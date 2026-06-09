@@ -31,8 +31,10 @@
             .print-column-title-row { align-items: center; display: flex; justify-content: space-between; }
             .print-column-title { font-size: 10px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; }
             .print-count { background: white; border: 1px solid #cbd5e1; border-radius: 999px; font-size: 9px; font-weight: 800; padding: 1px 6px; }
-            .print-header-details { color: #475569; display: grid; gap: 1px; font-size: 8px; margin-top: 4px; }
-            .print-detail { line-height: 1.2; overflow-wrap: anywhere; }
+            .print-header-details { color: #475569; display: grid; gap: 2px; font-size: 8px; margin-top: 5px; }
+            .print-detail { display: grid; gap: 3px; grid-template-columns: 48px 1fr; line-height: 1.2; }
+            .print-detail-label { font-weight: 800; }
+            .print-detail-value { overflow-wrap: anywhere; }
             .print-student-list { background: white; list-style: none; margin: 0; padding: 4px 6px 6px; }
             .print-student { border-bottom: 1px solid #e2e8f0; color: #1e293b; font-size: 9px; line-height: 1.15; padding: 2px 0; }
             .print-student:last-child { border-bottom: 0; }
@@ -349,19 +351,18 @@
         }
 
         function columnHeaderDetails(group) {
-            const column = Array.from(document.querySelectorAll('#board .kanban-column'))
-                .find(el => el.dataset.group === group);
-            const card = column && column.closest('.column-card');
-            if (!card) return '';
+            const meta = columnMetadata(group);
+            const rows = [
+                ['Location', meta.location],
+                ['Skill', meta.skill],
+                ['Curriculum', meta.curriculum]
+            ];
 
-            return Array.from(card.querySelectorAll('input[data-print-label]'))
-                .map(input => ({
-                    label: input.dataset.printLabel,
-                    value: input.value.trim()
-                }))
-                .filter(item => item.value)
-                .map(item => `<div class="print-detail"><strong>${escapeHtml(item.label)}:</strong> ${escapeHtml(item.value)}</div>`)
-                .join('');
+            return rows.map(([label, value]) => `
+                <div class="print-detail">
+                    <span class="print-detail-label">${escapeHtml(label)}:</span>
+                    <span class="print-detail-value">${value ? escapeHtml(value) : '&mdash;'}</span>
+                </div>`).join('');
         }
 
         function renderPrintNames(list) {
@@ -393,7 +394,7 @@
                                 <div class="print-column-title">${escapeHtml(group)}</div>
                                 <div class="print-count">${inColumn.length}</div>
                             </div>
-                            ${detailsHtml ? `<div class="print-header-details">${detailsHtml}</div>` : ''}
+                            <div class="print-header-details">${detailsHtml}</div>
                         </div>
                         ${renderPrintNames(inColumn)}
                     </section>`;
