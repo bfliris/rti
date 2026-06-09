@@ -15,10 +15,10 @@ const SPREADSHEET_ID = '1zM4-AcA2DacMMFq91xfYqS9lmf1oP03u4ETNlkprvKg';
 const STUDENT_SHEET  = 'Students';
 const NOTES_SHEET    = 'Notes';
 const SUBJECTS       = ['ELA', 'Math'];
-const DEFAULT_GROUPS = ['Unassigned', 'Tier 1', 'Tier 2', 'Tier 3'];
 
-// Expected header names in the Students sheet. Group columns are derived as
-// `${subject} Group`, `${subject} Score Level`, `${subject} Scale Score`.
+// Expected header names in the Students sheet. Group and scale columns are
+// derived as `${subject} Group` and `${subject} Scale Score`. BOY level columns
+// use the source sheet's exact headers: "ELA BOY Level" and "MATH BOY Level".
 const COL = {
   id:       'Student ID',
   name:     'Name',
@@ -35,8 +35,8 @@ const COL = {
 const STUDENT_HEADERS = [
   COL.id, COL.name, COL.grade, COL.team, COL.sped, COL.el, COL.five04,
   COL.absences, COL.tardies,
-  'ELA Group', 'ELA Score Level', 'ELA Scale Score',
-  'Math Group', 'Math Score Level', 'Math Scale Score',
+  'ELA Group', 'ELA BOY Level', 'ELA Scale Score',
+  'Math Group', 'MATH BOY Level', 'Math Scale Score',
   COL.updated
 ];
 
@@ -66,6 +66,10 @@ function headerMap_(headerRow) {
 
 function str_(v) { return String(v == null ? '' : v).trim(); }
 function yn_(v)  { return str_(v).toLowerCase() === 'yes' ? 'Yes' : 'No'; }
+
+function boyLevelColumn_(subject) {
+  return subject === 'Math' ? 'MATH BOY Level' : subject + ' BOY Level';
+}
 
 function pushUnique_(arr, value) {
   const name = str_(value) || 'Unassigned';
@@ -157,7 +161,7 @@ function getData() {
 
   const subjectBlock = (row, subject) => ({
     group: str_(get(row, subject + ' Group')) || 'Unassigned',
-    level: str_(get(row, subject + ' Score Level')),
+    level: str_(get(row, boyLevelColumn_(subject))),
     scale: get(row, subject + ' Scale Score')
   });
 
@@ -380,9 +384,9 @@ function setupSheets() {
     s.setFrozenRows(1);
 
     const sample = [
-      ['1001', 'Kai A.',     '3', 'Room 12', 'No',  'Yes', 'No', 4, 2, 'Tier 2', 'Below',      412, 'Tier 1', 'At',    455, ''],
-      ['1002', 'Leilani B.', '3', 'Room 12', 'Yes', 'No',  'No', 9, 1, 'Tier 3', 'Well Below', 388, 'Tier 2', 'Below', 430, ''],
-      ['1003', 'Mateo C.',   '4', 'Room 21', 'No',  'No',  'No', 1, 0, 'Tier 1', 'At',         498, 'Tier 2', 'Below', 440, '']
+      ['1001', 'Kai A.',     '3', 'Room 12', 'No',  'Yes', 'No', 4, 2, 'Tier 2', 'One grade level below',       412, 'Tier 1', 'On grade',        455, ''],
+      ['1002', 'Leilani B.', '3', 'Room 12', 'Yes', 'No',  'No', 9, 1, 'Tier 3', 'Two or more grade levels below', 388, 'Tier 2', 'Below grade',    430, ''],
+      ['1003', 'Mateo C.',   '4', 'Room 21', 'No',  'No',  'No', 1, 0, 'Tier 1', 'On or Above grade level',     498, 'Tier 2', 'Above grade',    440, '']
     ];
     s.getRange(2, 1, sample.length, sample[0].length).setValues(sample);
 
