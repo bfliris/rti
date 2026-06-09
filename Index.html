@@ -141,6 +141,13 @@
         const FLAG_STYLES = { SPED: 'bg-red-100 text-red-700', EL: 'bg-amber-100 text-amber-700', '504': 'bg-purple-100 text-purple-700' };
         const COLOR_KEYS = ['slate', 'red', 'yellow', 'green', 'blue'];
         const SWATCH = { slate: 'bg-slate-300 border-slate-400', red: 'bg-red-400 border-red-500', yellow: 'bg-yellow-400 border-yellow-500', green: 'bg-green-400 border-green-500', blue: 'bg-blue-400 border-blue-500' };
+        const LEVEL_BADGE_STYLES = {
+            slate: 'bg-slate-100 border-slate-200 text-slate-500',
+            red: 'bg-red-100 border-red-200 text-red-700',
+            yellow: 'bg-yellow-100 border-yellow-200 text-yellow-700',
+            green: 'bg-green-100 border-green-200 text-green-700',
+            blue: 'bg-blue-100 border-blue-200 text-blue-700'
+        };
 
         window.onload = refreshData;
 
@@ -259,6 +266,34 @@
         function scaleOf(student) {
             const v = Number(student[currentSubject].scale);
             return isNaN(v) ? Infinity : v; // blanks sink to the bottom
+        }
+
+        function normalizedLevel(level) {
+            return String(level || '').trim().toLowerCase();
+        }
+
+        function levelColor(subject, level) {
+            const value = normalizedLevel(level);
+            if (!value) return 'slate';
+
+            if (subject === 'ELA') {
+                if (value.includes('two or more') || value.includes('well below')) return 'red';
+                if (value.includes('one grade') || value === 'below' || value.includes('below grade')) return 'yellow';
+                if (value.includes('on or above') || value === 'at' || value.includes('on grade') || value.includes('above')) return 'green';
+                return 'slate';
+            }
+
+            if (value.includes('far below')) return 'red';
+            if (value === 'below' || value.includes('below grade')) return 'yellow';
+            if (value.includes('on grade') || value === 'at') return 'green';
+            if (value.includes('above')) return 'blue';
+            return 'slate';
+        }
+
+        function levelBadge(student, subject, label) {
+            const level = student[subject] && student[subject].level;
+            const color = levelColor(subject, level);
+            return `<span class="h-6 w-6 rounded-full border ${LEVEL_BADGE_STYLES[color]} flex items-center justify-center text-xs font-black shadow-sm" title="${subject}: ${escapeAttr(level || 'No BOY level')}">${label}</span>`;
         }
 
         function addGroupPrompt() {
@@ -436,19 +471,24 @@
             if (list.length === 0) return `<div class="text-center py-6 text-slate-300 text-[10px] italic border border-dashed rounded-xl border-slate-200">Empty</div>`;
             return list.map(s => {
                 const flag = (key, label) => `<span class="${FLAG_STYLES[key]} px-1.5 py-0.5 rounded text-[8px] font-bold">${label}</span>`;
+                const flags = [
+                    s.sped === 'Yes' ? flag('SPED', 'SPED') : '',
+                    s.el === 'Yes' ? flag('EL', 'EL') : '',
+                    s.five04 === 'Yes' ? flag('504', '504') : ''
+                ].filter(Boolean).join('');
                 const scale = s[currentSubject].scale;
                 return `
-                <div data-id="${escapeAttr(s.id)}" onclick="openModalFromCard(this)" class="student-card bg-white p-4 rounded-xl shadow-sm border border-slate-200 cursor-grab hover:border-blue-400 hover:shadow-md transition-all">
-                    <div class="flex justify-between items-center mb-2 pointer-events-none">
-                        <span class="text-[9px] font-mono text-slate-400">ID: ${escapeHtml(s.id)}</span>
-                        <div class="flex space-x-1">
-                            ${s.sped === 'Yes' ? flag('SPED', 'SPED') : ''}
-                            ${s.el === 'Yes' ? flag('EL', 'EL') : ''}
-                            ${s.five04 === 'Yes' ? flag('504', '504') : ''}
-                        </div>
+                <div data-id="${escapeAttr(s.id)}" onclick="openModalFromCard(this)" class="student-card relative bg-white p-4 rounded-xl shadow-sm border border-slate-200 cursor-grab hover:border-blue-400 hover:shadow-md transition-all">
+                    <div class="absolute top-3 right-3 flex gap-1 pointer-events-none">
+                        ${levelBadge(s, 'ELA', 'E')}
+                        ${levelBadge(s, 'Math', 'M')}
                     </div>
-                    <div class="font-bold text-slate-800 text-xs pointer-events-none">${escapeHtml(s.name)}</div>
+                    <div class="flex justify-between items-center mb-2 pr-16 pointer-events-none">
+                        <span class="text-[9px] font-mono text-slate-400">ID: ${escapeHtml(s.id)}</span>
+                    </div>
+                    <div class="font-bold text-slate-800 text-xs pr-16 pointer-events-none">${escapeHtml(s.name)}</div>
                     <div class="text-[10px] text-slate-400 mt-1 pointer-events-none">${escapeHtml(s.team || 'No Team')}</div>
+                    ${flags ? `<div class="flex space-x-1 mt-2 pointer-events-none">${flags}</div>` : ''}
                     <div class="mt-3 flex items-center justify-between pointer-events-none">
                         <div class="text-[9px] bg-slate-50 px-2 py-1 rounded text-slate-500">${currentSubject} Scale: <span class="font-bold text-blue-600">${escapeHtml(scale || '--')}</span></div>
                         <div class="text-[9px] text-slate-400">Abs: <span class="${s.absences > 5 ? 'text-red-500 font-bold' : ''}">${s.absences}</span></div>
