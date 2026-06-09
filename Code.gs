@@ -14,6 +14,7 @@
 const SPREADSHEET_ID = '1zM4-AcA2DacMMFq91xfYqS9lmf1oP03u4ETNlkprvKg';
 const STUDENT_SHEET  = 'Students';
 const NOTES_SHEET    = 'Notes';
+const GROUP_METADATA_SHEET = 'Group Metadata';
 const SUBJECTS       = ['ELA', 'Math'];
 
 // Expected header names in the Students sheet. Group and scale columns are
@@ -41,6 +42,7 @@ const STUDENT_HEADERS = [
 ];
 
 const NOTES_HEADERS = ['Timestamp', 'Student ID', 'Student Name', 'Grade', 'Subject', 'Author', 'Note'];
+const GROUP_METADATA_HEADERS = ['Subject', 'Grade', 'Group', 'Color', 'Location', 'Skill', 'Curriculum', 'Sort Order'];
 
 
 /* ───────────────────────────── Web app entry ───────────────────────────── */
@@ -71,6 +73,11 @@ function boyLevelColumn_(subject) {
   return subject === 'Math' ? 'MATH BOY Level' : subject + ' BOY Level';
 }
 
+function canonicalSubject_(subject) {
+  const clean = str_(subject).toLowerCase();
+  return SUBJECTS.filter(s => s.toLowerCase() === clean)[0] || '';
+}
+
 function pushUnique_(arr, value) {
   const name = str_(value) || 'Unassigned';
   if (arr.indexOf(name) === -1) arr.push(name);
@@ -90,14 +97,189 @@ function studentSheet_() {
   return sheet;
 }
 
-function loadJson_(key)      { return JSON.parse(PropertiesService.getScriptProperties().getProperty(key) || '{}'); }
-function saveJson_(key, obj) { PropertiesService.getScriptProperties().setProperty(key, JSON.stringify(obj)); }
-function loadGroups_()       { return loadJson_('rti_groups'); }
-function saveGroups_(o)      { saveJson_('rti_groups', o); }
-function loadColors_()       { return loadJson_('rti_colors'); }
-function saveColors_(o)      { saveJson_('rti_colors', o); }
+function ensureSheetHeaders_(sheet, headers) {
+  if (sheet.getLastRow() === 0) {
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]).setFontWeight('bold');
+    sheet.setFrozenRows(1);
+    return;
+  }
 
-function sheetGroupsFromStudents_(students, savedGroups) {
+  const lastCol = Math.max(sheet.getLastColumn(), headers.length);
+  const current = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  const col = headerMap_(current);
+  let nextCol = lastCol + 1;
+  headers.forEach(header => {
+    if (col[header] === undefined) {
+      sheet.getRange(1, nextCol).setValue(header).setFontWeight('bold');
+      nextCol++;
+    }
+  });
+  sheet.setFrozenRows(1);
+}
+
+function groupMetadataSheet_(ss) {
+  const sheet = ss.getSheetByName(GROUP_METADATA_SHEET) || ss.insertSheet(GROUP_METADATA_SHEET);
+  ensureSheetHeaders_(sheet, GROUP_METADATA_HEADERS);
+  return sheet;
+}
+
+function metadataOrder_(metadata, subject, grade) {
+  const byGroup = metadata[subject] && metadata[subject][grade] ? metadata[subject][grade] : {};
+  return Object.keys(byGroup).sort((a, b) => {
+    const ao = byGroup[a].order;
+    const bo = byGroup[b].order;
+    if (ao !== bo) return ao - bo;
+    return byGroup[a].row - byGroup[b].row;
+  });
+}
+
+function readGroupMetadata_() {
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const sheet = groupMetadataSheet_(ss);
+  const values = sheet.getDataRange().getValues();
+  const metadata = {};
+  if (values.length <= 1) return metadata;
+
+  const col = headerMap_(values[0]);
+  for (let i = 1; i < values.length; i++) {
+    const subject = canonicalSubject_(values[i][col['Subject']]);
+    if (!subject) continue;
+
+    const grade = str_(values[i][col['Grade']]) || 'Unassigned';
+    const group = str_(values[i][col['Group']]) || 'Unassigned';
+    const rawOrder = Number(values[i][col['Sort Order']]);
+
+    if (!metadata[subject]) metadata[subject] = {};
+    if (!metadata[subject][grade]) metadata[subject][grade] = {};
+    metadata[subject][grade][group] = {
+      color: str_(values[i][col['Color']]),
+      location: str_(values[i][col['Location']]),
+      skill: str_(values[i][col['Skill']]),
+      curriculum: str_(values[i][col['Curriculum']]),
+      order: isNaN(rawOrder) ? i : rawOrder,
+      row: i
+    };
+  }
+  return metadata;
+}
+
+function metadataGroupsFor_(metadata, subject, grade) {
+  return Object.keys((metadata[subject] && metadata[subject][grade]) || {});
+}
+
+function currentGroupsFor_(subject, grade, metadata) {
+  const groups = sheetGroupsFor_(subject, grade);
+  metadataGroupsFor_(metadata, subject, grade).forEach(group => pushUnique_(groups, group));
+  return orderGroups_(groups, metadataOrder_(metadata, subject, grade));
+}
+
+function colorsFromMetadata_(metadata) {
+  const colors = {};
+  SUBJECTS.forEach(subject => {
+    colors[subject] = {};
+    Object.keys(metadata[subject] || {}).forEach(grade => {
+      colors[subject][grade] = {};
+      Object.keys(metadata[subject][grade]).forEach(group => {
+        const color = metadata[subject][grade][group].color;
+        if (color) colors[subject][grade][group] = color;
+      });
+    });
+  });
+  return colors;
+}
+
+function columnMetaFromMetadata_(metadata) {
+  const columnMeta = {};
+  SUBJECTS.forEach(subject => {
+    columnMeta[subject] = {};
+    Object.keys(metadata[subject] || {}).forEach(grade => {
+      columnMeta[subject][grade] = {};
+      Object.keys(metadata[subject][grade]).forEach(group => {
+        const meta = metadata[subject][grade][group];
+        columnMeta[subject][grade][group] = {
+          location: meta.location,
+          skill: meta.skill,
+          curriculum: meta.curriculum
+        };
+      });
+    });
+  });
+  return columnMeta;
+}
+
+function upsertGroupMetadata_(subject, grade, groupName, patch) {
+  const cleanSubject = canonicalSubject_(subject);
+  if (!cleanSubject) throw new Error('Unknown subject: ' + subject);
+  const cleanGrade = str_(grade) || 'Unassigned';
+  const cleanGroup = str_(groupName) || 'Unassigned';
+
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const sheet = groupMetadataSheet_(ss);
+  const values = sheet.getDataRange().getValues();
+  const col = headerMap_(values[0]);
+
+  let rowIndex = -1;
+  for (let i = 1; i < values.length; i++) {
+    if (
+      canonicalSubject_(values[i][col['Subject']]) === cleanSubject &&
+      (str_(values[i][col['Grade']]) || 'Unassigned') === cleanGrade &&
+      (str_(values[i][col['Group']]) || 'Unassigned') === cleanGroup
+    ) {
+      rowIndex = i + 1;
+      break;
+    }
+  }
+
+  const row = rowIndex === -1
+    ? new Array(sheet.getLastColumn()).fill('')
+    : sheet.getRange(rowIndex, 1, 1, sheet.getLastColumn()).getValues()[0];
+
+  row[col['Subject']] = cleanSubject;
+  row[col['Grade']] = cleanGrade;
+  row[col['Group']] = cleanGroup;
+  if (patch.color !== undefined) row[col['Color']] = str_(patch.color);
+  if (patch.location !== undefined) row[col['Location']] = str_(patch.location);
+  if (patch.skill !== undefined) row[col['Skill']] = str_(patch.skill);
+  if (patch.curriculum !== undefined) row[col['Curriculum']] = str_(patch.curriculum);
+  if (patch.order !== undefined) row[col['Sort Order']] = patch.order;
+
+  if (rowIndex === -1) {
+    sheet.appendRow(row);
+  } else {
+    sheet.getRange(rowIndex, 1, 1, row.length).setValues([row]);
+  }
+}
+
+function renameGroupMetadata_(subject, grade, oldName, newName) {
+  const cleanSubject = canonicalSubject_(subject);
+  if (!cleanSubject) throw new Error('Unknown subject: ' + subject);
+  const cleanGrade = str_(grade) || 'Unassigned';
+  const cleanOldName = str_(oldName) || 'Unassigned';
+  const cleanNewName = str_(newName) || 'Unassigned';
+
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const sheet = groupMetadataSheet_(ss);
+  const values = sheet.getDataRange().getValues();
+  if (values.length <= 1) {
+    upsertGroupMetadata_(cleanSubject, cleanGrade, cleanNewName, {});
+    return;
+  }
+
+  const col = headerMap_(values[0]);
+  for (let i = 1; i < values.length; i++) {
+    if (
+      canonicalSubject_(values[i][col['Subject']]) === cleanSubject &&
+      (str_(values[i][col['Grade']]) || 'Unassigned') === cleanGrade &&
+      (str_(values[i][col['Group']]) || 'Unassigned') === cleanOldName
+    ) {
+      sheet.getRange(i + 1, col['Group'] + 1).setValue(cleanNewName);
+      return;
+    }
+  }
+  upsertGroupMetadata_(cleanSubject, cleanGrade, cleanNewName, {});
+}
+
+function sheetGroupsFromStudents_(students, metadata) {
   const groups = {};
 
   SUBJECTS.forEach(subject => {
@@ -108,9 +290,13 @@ function sheetGroupsFromStudents_(students, savedGroups) {
       pushUnique_(groups[subject][grade], student[subject].group);
     });
 
+    Object.keys(metadata[subject] || {}).forEach(grade => {
+      if (!groups[subject][grade]) groups[subject][grade] = [];
+      metadataGroupsFor_(metadata, subject, grade).forEach(group => pushUnique_(groups[subject][grade], group));
+    });
+
     Object.keys(groups[subject]).forEach(grade => {
-      const savedOrder = savedGroups[subject] && savedGroups[subject][grade];
-      groups[subject][grade] = orderGroups_(groups[subject][grade], savedOrder);
+      groups[subject][grade] = orderGroups_(groups[subject][grade], metadataOrder_(metadata, subject, grade));
     });
   });
 
@@ -153,7 +339,7 @@ function getData() {
   const values = sheet.getDataRange().getValues();
 
   if (values.length <= 1) {
-    return { students: [], groups: {}, colors: loadColors_() };
+    return { students: [], groups: {}, colors: {}, columnMeta: {} };
   }
 
   const col = headerMap_(values.shift());
@@ -181,13 +367,15 @@ function getData() {
       Math:     subjectBlock(r, 'Math')
     }));
 
-  // Visible board columns come from the sheet's ELA Group and Math Group
-  // values. Saved groups only preserve ordering for groups still in the sheet.
-  const savedGroups = loadGroups_();
-  const groups = sheetGroupsFromStudents_(students, savedGroups);
-  const colors = loadColors_();
+  // Visible board columns come from the sheet's ELA/Math group values plus any
+  // explicit rows in Group Metadata. Metadata rows hold order, color, and header
+  // fields for empty groups as well as groups with assigned students.
+  const groupMetadata = readGroupMetadata_();
+  const groups = sheetGroupsFromStudents_(students, groupMetadata);
+  const colors = colorsFromMetadata_(groupMetadata);
+  const columnMeta = columnMetaFromMetadata_(groupMetadata);
 
-  return { students, groups, colors };
+  return { students, groups, colors, columnMeta };
 }
 
 
@@ -230,15 +418,12 @@ function addGroup(subject, grade, groupName) {
     const cleanGroup = str_(groupName);
     if (!cleanGroup) throw new Error('Group name is required.');
 
-    const groups = loadGroups_();
-    if (!groups[subject]) groups[subject] = {};
-    const sheetGroups = sheetGroupsFor_(subject, cleanGrade);
-    const currentGroups = orderGroups_(sheetGroups, groups[subject][cleanGrade]);
+    const metadata = readGroupMetadata_();
+    const currentGroups = currentGroupsFor_(subject, cleanGrade, metadata);
     if (currentGroups.indexOf(cleanGroup) === -1) {
       currentGroups.push(cleanGroup);
     }
-    groups[subject][cleanGrade] = currentGroups;
-    saveGroups_(groups);
+    upsertGroupMetadata_(subject, cleanGrade, cleanGroup, { order: currentGroups.indexOf(cleanGroup) + 1 });
     return { success: true, groups: currentGroups };
   } finally {
     lock.releaseLock();
@@ -255,22 +440,14 @@ function renameGroup(subject, grade, oldName, newName) {
     const cleanNewName = str_(newName);
     if (!cleanOldName || !cleanNewName) throw new Error('Group names are required.');
 
-    const groups = loadGroups_();
-    const colors = loadColors_();
-    if (!groups[subject]) groups[subject] = {};
-
-    const arr = orderGroups_(sheetGroupsFor_(subject, cleanGrade), groups[subject][cleanGrade]);
+    const metadata = readGroupMetadata_();
+    const arr = currentGroupsFor_(subject, cleanGrade, metadata);
     const idx = arr.indexOf(cleanOldName);
     if (idx !== -1) arr[idx] = cleanNewName;
     else if (arr.indexOf(cleanNewName) === -1) arr.push(cleanNewName);
-    groups[subject][cleanGrade] = arr;
-    saveGroups_(groups);
 
-    if (colors[subject] && colors[subject][cleanGrade] && colors[subject][cleanGrade][cleanOldName]) {
-      colors[subject][cleanGrade][cleanNewName] = colors[subject][cleanGrade][cleanOldName];
-      delete colors[subject][cleanGrade][cleanOldName];
-      saveColors_(colors);
-    }
+    renameGroupMetadata_(subject, cleanGrade, cleanOldName, cleanNewName);
+    arr.forEach((name, index) => upsertGroupMetadata_(subject, cleanGrade, name, { order: index + 1 }));
 
     // Re-label matching cells on the sheet.
     const sheet    = studentSheet_();
@@ -295,11 +472,23 @@ function setGroupColor(subject, grade, groupName, color) {
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
-    const colors = loadColors_();
-    if (!colors[subject]) colors[subject] = {};
-    if (!colors[subject][grade]) colors[subject][grade] = {};
-    colors[subject][grade][groupName] = color;
-    saveColors_(colors);
+    upsertGroupMetadata_(subject, grade, groupName, { color: str_(color) });
+    return { success: true };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function setGroupMetadata(subject, grade, groupName, metadata) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const allowed = {};
+    metadata = metadata || {};
+    ['location', 'skill', 'curriculum'].forEach(field => {
+      if (metadata[field] !== undefined) allowed[field] = metadata[field];
+    });
+    upsertGroupMetadata_(subject, grade, groupName, allowed);
     return { success: true };
   } finally {
     lock.releaseLock();
@@ -323,10 +512,9 @@ function updateGroupOrder(subject, grade, orderedGroups) {
       });
     if (cleanOrder.length === 0) throw new Error('Column order is empty.');
 
-    const groups = loadGroups_();
-    if (!groups[subject]) groups[subject] = {};
-    groups[subject][cleanGrade] = cleanOrder;
-    saveGroups_(groups);
+    cleanOrder.forEach((name, index) => {
+      upsertGroupMetadata_(subject, cleanGrade, name, { order: index + 1 });
+    });
     return { success: true, groups: cleanOrder };
   } finally {
     lock.releaseLock();
@@ -403,7 +591,10 @@ function setupSheets() {
   // --- Notes ---
   if (!ss.getSheetByName(NOTES_SHEET)) createNotesSheet_(ss);
 
-  return 'Setup complete — Students and Notes sheets are ready.';
+  // --- Group Metadata ---
+  groupMetadataSheet_(ss).autoResizeColumns(1, GROUP_METADATA_HEADERS.length);
+
+  return 'Setup complete — Students, Notes, and Group Metadata sheets are ready.';
 }
 
 function createNotesSheet_(ss) {

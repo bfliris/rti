@@ -139,6 +139,7 @@
         let students = [];
         let groups = {};
         let colors = {};
+        let columnMeta = {};
         let currentGrade = localStorage.getItem('rtiGrade') || null;
         let currentSubject = localStorage.getItem('rtiSubject') || 'ELA';
         let activeStudentId = null;
@@ -214,6 +215,7 @@
                     students = data.students || [];
                     groups = data.groups || {};
                     colors = data.colors || {};
+                    columnMeta = data.columnMeta || {};
 
                     if (students.length === 0) {
                         document.getElementById('grade-nav').innerHTML = '<div class="text-slate-500 p-2 text-sm text-center">No data in sheet. Run setupSheets() once, then add students.</div>';
@@ -276,6 +278,8 @@
             if (!groups[currentSubject][currentGrade]) groups[currentSubject][currentGrade] = [];
             if (!colors[currentSubject]) colors[currentSubject] = {};
             if (!colors[currentSubject][currentGrade]) colors[currentSubject][currentGrade] = {};
+            if (!columnMeta[currentSubject]) columnMeta[currentSubject] = {};
+            if (!columnMeta[currentSubject][currentGrade]) columnMeta[currentSubject][currentGrade] = {};
         }
 
         function boardColumns() {
@@ -285,6 +289,13 @@
         function columnColors() {
             ensureBoardState();
             return (colors[currentSubject] && colors[currentSubject][currentGrade]) || {};
+        }
+        function columnMetadata(groupName) {
+            ensureBoardState();
+            if (!columnMeta[currentSubject][currentGrade][groupName]) {
+                columnMeta[currentSubject][currentGrade][groupName] = {};
+            }
+            return columnMeta[currentSubject][currentGrade][groupName];
         }
         function scaleOf(student) {
             const v = Number(student[currentSubject].scale);
@@ -409,6 +420,7 @@
 
             ensureBoardState();
             groups[currentSubject][currentGrade].push(trimmed);
+            columnMeta[currentSubject][currentGrade][trimmed] = {};
             renderBoard();
             toast('Creating column...', 'pending');
 
@@ -454,6 +466,24 @@
                 .setGroupColor(currentSubject, currentGrade, groupName, color);
         }
 
+        function setGroupMetadataFromInput(input) {
+            const column = input.closest('.column-card').querySelector('.kanban-column');
+            const groupName = column.dataset.group;
+            const field = input.dataset.metaField;
+            const value = input.value.trim();
+            const meta = columnMetadata(groupName);
+            meta[field] = value;
+
+            if (!inAppsScript()) return;
+            google.script.run
+                .withSuccessHandler(() => toast('Column details saved', 'ok'))
+                .withFailureHandler((err) => {
+                    toast('Column details failed', 'err');
+                    alert('Failed to save column details: ' + err);
+                })
+                .setGroupMetadata(currentSubject, currentGrade, groupName, { [field]: value });
+        }
+
         function resetSortables() {
             cardSortables.forEach(sortable => sortable.destroy());
             cardSortables = [];
@@ -488,6 +518,7 @@
                 const theme = COLUMN_THEMES[colColors[group] || 'slate'] || COLUMN_THEMES.slate;
                 const escapedGroup = escapeHtml(group);
                 const groupAttr = escapeAttr(group);
+                const meta = columnMetadata(group);
                 const inColumn = gradeStudents
                     .filter(s => s[currentSubject].group === group)
                     .sort((a, b) => scaleOf(a) - scaleOf(b));
@@ -511,9 +542,9 @@
                             </div>
                         </div>
                         <div class="mt-1 grid grid-cols-3 gap-1">
-                            <input type="text" data-print-label="Location" placeholder="Location" class="min-w-0 text-[9px] bg-white/50 border border-transparent hover:border-slate-300 focus:bg-white focus:border-blue-400 rounded px-1 py-0.5 outline-none transition-colors ${theme.text}" />
-                            <input type="text" data-print-label="Skill" placeholder="Skill" class="min-w-0 text-[9px] bg-white/50 border border-transparent hover:border-slate-300 focus:bg-white focus:border-blue-400 rounded px-1 py-0.5 outline-none transition-colors ${theme.text}" />
-                            <input type="text" data-print-label="Curriculum" placeholder="Curriculum" class="min-w-0 text-[9px] bg-white/50 border border-transparent hover:border-slate-300 focus:bg-white focus:border-blue-400 rounded px-1 py-0.5 outline-none transition-colors ${theme.text}" />
+                            <input type="text" data-print-label="Location" data-meta-field="location" value="${escapeAttr(meta.location || '')}" onchange="setGroupMetadataFromInput(this)" placeholder="Location" class="min-w-0 text-[9px] bg-white/50 border border-transparent hover:border-slate-300 focus:bg-white focus:border-blue-400 rounded px-1 py-0.5 outline-none transition-colors ${theme.text}" />
+                            <input type="text" data-print-label="Skill" data-meta-field="skill" value="${escapeAttr(meta.skill || '')}" onchange="setGroupMetadataFromInput(this)" placeholder="Skill" class="min-w-0 text-[9px] bg-white/50 border border-transparent hover:border-slate-300 focus:bg-white focus:border-blue-400 rounded px-1 py-0.5 outline-none transition-colors ${theme.text}" />
+                            <input type="text" data-print-label="Curriculum" data-meta-field="curriculum" value="${escapeAttr(meta.curriculum || '')}" onchange="setGroupMetadataFromInput(this)" placeholder="Curriculum" class="min-w-0 text-[9px] bg-white/50 border border-transparent hover:border-slate-300 focus:bg-white focus:border-blue-400 rounded px-1 py-0.5 outline-none transition-colors ${theme.text}" />
                         </div>
                     </div>
                     <div data-group="${groupAttr}" class="kanban-column p-3 space-y-3 flex-grow overflow-y-auto min-h-[100px]">
