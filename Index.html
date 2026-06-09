@@ -128,6 +128,8 @@
         let currentGrade = localStorage.getItem('rtiGrade') || null;
         let currentSubject = localStorage.getItem('rtiSubject') || 'ELA';
         let activeStudentId = null;
+        let columnSortable = null;
+        let cardSortables = [];
 
         const COLUMN_THEMES = {
             slate:  { bg: 'bg-slate-200/40',  border: 'border-slate-200/60',  headerBg: 'bg-white/50',     text: 'text-slate-500' },
@@ -139,6 +141,7 @@
         const FLAG_STYLES = { SPED: 'bg-red-100 text-red-700', EL: 'bg-amber-100 text-amber-700', '504': 'bg-purple-100 text-purple-700' };
         const COLOR_KEYS = ['slate', 'red', 'yellow', 'green', 'blue'];
         const SWATCH = { slate: 'bg-slate-300 border-slate-400', red: 'bg-red-400 border-red-500', yellow: 'bg-yellow-400 border-yellow-500', green: 'bg-green-400 border-green-500', blue: 'bg-blue-400 border-blue-500' };
+        const DEFAULT_BOARD_COLUMNS = ['Unassigned', 'Tier 1', 'Tier 2', 'Tier 3'];
 
         window.onload = refreshData;
 
@@ -238,10 +241,20 @@
             if (window.innerWidth < 1024) toggleSidebar();
         }
 
+        function ensureBoardState() {
+            if (!currentGrade) return;
+            if (!groups[currentSubject]) groups[currentSubject] = {};
+            if (!groups[currentSubject][currentGrade]) groups[currentSubject][currentGrade] = DEFAULT_BOARD_COLUMNS.slice();
+            if (!colors[currentSubject]) colors[currentSubject] = {};
+            if (!colors[currentSubject][currentGrade]) colors[currentSubject][currentGrade] = {};
+        }
+
         function boardColumns() {
-            return (groups[currentSubject] && groups[currentSubject][currentGrade]) || ['Unassigned', 'Tier 1', 'Tier 2', 'Tier 3'];
+            ensureBoardState();
+            return (groups[currentSubject] && groups[currentSubject][currentGrade]) || DEFAULT_BOARD_COLUMNS.slice();
         }
         function columnColors() {
+            ensureBoardState();
             return (colors[currentSubject] && colors[currentSubject][currentGrade]) || {};
         }
         function scaleOf(student) {
@@ -252,13 +265,34 @@
         function addGroupPrompt() {
             if (!currentGrade) { alert('Select a grade first.'); return; }
             const name = prompt(`New ${currentSubject} column for Grade ${currentGrade}:`);
-            if (!name || !name.trim()) return;
-            if (boardColumns().includes(name.trim())) { alert('That column already exists.'); return; }
-            showLoading(true, 'Creating column...');
+            const trimmed = name && name.trim();
+            if (!trimmed) return;
+            if (boardColumns().includes(trimmed)) { alert('That column already exists.'); return; }
+
+            ensureBoardState();
+            groups[currentSubject][currentGrade].push(trimmed);
+            renderBoard();
+            toast('Creating column...', 'pending');
+
+            if (!inAppsScript()) {
+                toast('Column added locally', 'ok');
+                return;
+            }
             google.script.run
-                .withSuccessHandler(() => refreshData())
-                .withFailureHandler((err) => { alert('Failed to add: ' + err); showLoading(false); })
-                .addGroup(currentSubject, currentGrade, name.trim());
+                .withSuccessHandler((result) => {
+                    if (result && result.groups) {
+                        groups[currentSubject][currentGrade] = result.groups;
+                        renderBoard();
+                    }
+                    toast('Column added', 'ok');
+                })
+                .withFailureHandler((err) => {
+                    groups[currentSubject][currentGrade] = groups[currentSubject][currentGrade].filter(g => g !== trimmed);
+                    renderBoard();
+                    toast('Column failed', 'err');
+                    alert('Failed to add: ' + err);
+                })
+                .addGroup(currentSubject, currentGrade, trimmed);
         }
 
         function renameGroupPrompt(oldName) {
@@ -276,13 +310,32 @@
             if (!colors[currentSubject][currentGrade]) colors[currentSubject][currentGrade] = {};
             colors[currentSubject][currentGrade][groupName] = color;
             renderBoard(); // optimistic
+            if (!inAppsScript()) return;
             google.script.run
                 .withFailureHandler((err) => alert('Failed to save color: ' + err))
                 .setGroupColor(currentSubject, currentGrade, groupName, color);
         }
 
+        function resetSortables() {
+            cardSortables.forEach(sortable => sortable.destroy());
+            cardSortables = [];
+            if (columnSortable) {
+                columnSortable.destroy();
+                columnSortable = null;
+            }
+        }
+
+        function renameGroupFromButton(button) {
+            renameGroupPrompt(button.dataset.group);
+        }
+
+        function setGroupColorFromButton(button, color) {
+            setGroupColor(button.dataset.group, color);
+        }
+
         function renderBoard() {
             const board = document.getElementById('board');
+            resetSortables();
             board.innerHTML = '';
             if (!currentGrade) return;
 
@@ -295,63 +348,89 @@
 
             cols.forEach(group => {
                 const theme = COLUMN_THEMES[colColors[group] || 'slate'] || COLUMN_THEMES.slate;
+                const escapedGroup = escapeHtml(group);
+                const groupAttr = escapeAttr(group);
                 const inColumn = gradeStudents
                     .filter(s => s[currentSubject].group === group)
                     .sort((a, b) => scaleOf(a) - scaleOf(b));
 
                 const colDiv = document.createElement('div');
-                // Added layout classes and setup for making the column reorderable
                 colDiv.className = `flex-shrink-0 w-80 rounded-2xl border flex flex-col shadow-sm max-h-full transition-colors duration-300 ${theme.bg} ${theme.border} column-card`;
-                
-                // Adjusted header: reduced padding (px-3 py-2), added drag handle capability, and inserted editable fields.
                 colDiv.innerHTML = `
-                    <div class="px-3 py-2 flex flex-col border-b border-slate-200/50 rounded-t-2xl group/header transition-colors hover:bg-white/60 ${theme.headerBg} column-drag-handle cursor-grab active:cursor-grabbing">
-                        <div class="flex justify-between items-center">
-                            <h2 class="font-bold uppercase text-[11px] tracking-widest flex items-center gap-2 ${theme.text}">
-                                ${group}
-                                ${group !== 'Unassigned' ? `<button onclick="renameGroupPrompt('${group.replace(/'/g, "\\'")}')" title="Rename" class="opacity-50 hover:opacity-100 transition-opacity">
+                    <div class="px-2.5 py-1.5 flex flex-col border-b border-slate-200/50 rounded-t-2xl transition-colors hover:bg-white/60 ${theme.headerBg} column-drag-handle cursor-grab active:cursor-grabbing">
+                        <div class="flex justify-between items-center gap-2">
+                            <h2 class="font-bold uppercase text-[10px] tracking-widest flex items-center gap-1.5 min-w-0 ${theme.text}">
+                                <span class="truncate">${escapedGroup}</span>
+                                ${group !== 'Unassigned' ? `<button type="button" data-group="${groupAttr}" onclick="event.stopPropagation(); renameGroupFromButton(this)" title="Rename" class="opacity-60 hover:opacity-100 transition-opacity shrink-0">
                                     <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" /></svg>
                                 </button>` : ''}
                             </h2>
-                            <div class="flex space-x-1.5 opacity-0 group-hover/header:opacity-100 transition-opacity ml-auto mr-2">
-                                ${COLOR_KEYS.map(c => `<button onclick="setGroupColor('${group.replace(/'/g, "\\'")}', '${c}')" class="w-3 h-3 rounded-full ${SWATCH[c]} border hover:scale-110 shadow-sm" title="${c}"></button>`).join('')}
+                            <div class="flex items-center gap-1.5 shrink-0">
+                                <div class="flex space-x-1">
+                                    ${COLOR_KEYS.map(c => `<button type="button" data-group="${groupAttr}" onclick="event.stopPropagation(); setGroupColorFromButton(this, '${c}')" class="w-3 h-3 rounded-full ${SWATCH[c]} border hover:scale-110 shadow-sm" title="${c}"></button>`).join('')}
+                                </div>
+                                <span class="bg-white px-1.5 py-0.5 rounded-full text-[10px] font-black border shadow-sm border-slate-200 ${theme.text}">${inColumn.length}</span>
                             </div>
-                            <span class="bg-white px-2 py-0.5 rounded-full text-[10px] font-black border shadow-sm border-slate-200 ${theme.text}">${inColumn.length}</span>
                         </div>
-                        <div class="mt-2 space-y-1">
-                            <input type="text" placeholder="Location" class="w-full text-[10px] bg-white/50 border border-transparent hover:border-slate-300 focus:bg-white focus:border-blue-400 rounded px-1.5 py-0.5 outline-none transition-colors ${theme.text}" />
-                            <input type="text" placeholder="Target Skill" class="w-full text-[10px] bg-white/50 border border-transparent hover:border-slate-300 focus:bg-white focus:border-blue-400 rounded px-1.5 py-0.5 outline-none transition-colors ${theme.text}" />
-                            <input type="text" placeholder="Curriculum" class="w-full text-[10px] bg-white/50 border border-transparent hover:border-slate-300 focus:bg-white focus:border-blue-400 rounded px-1.5 py-0.5 outline-none transition-colors ${theme.text}" />
+                        <div class="mt-1 grid grid-cols-3 gap-1">
+                            <input type="text" placeholder="Location" class="min-w-0 text-[9px] bg-white/50 border border-transparent hover:border-slate-300 focus:bg-white focus:border-blue-400 rounded px-1 py-0.5 outline-none transition-colors ${theme.text}" />
+                            <input type="text" placeholder="Skill" class="min-w-0 text-[9px] bg-white/50 border border-transparent hover:border-slate-300 focus:bg-white focus:border-blue-400 rounded px-1 py-0.5 outline-none transition-colors ${theme.text}" />
+                            <input type="text" placeholder="Curriculum" class="min-w-0 text-[9px] bg-white/50 border border-transparent hover:border-slate-300 focus:bg-white focus:border-blue-400 rounded px-1 py-0.5 outline-none transition-colors ${theme.text}" />
                         </div>
                     </div>
-                    <div data-group="${group}" class="kanban-column p-3 space-y-3 flex-grow overflow-y-auto min-h-[100px]">
+                    <div data-group="${groupAttr}" class="kanban-column p-3 space-y-3 flex-grow overflow-y-auto min-h-[100px]">
                         ${renderCards(inColumn)}
                     </div>
                 `;
                 board.appendChild(colDiv);
+            });
 
-                // Student drag-and-drop
-                new Sortable(colDiv.querySelector('.kanban-column'), {
+            board.querySelectorAll('.kanban-column').forEach(column => {
+                cardSortables.push(new Sortable(column, {
                     group: 'rti-students',
                     animation: 200,
                     ghostClass: 'sortable-ghost',
+                    draggable: '.student-card',
+                    emptyInsertThreshold: 24,
                     onEnd: (evt) => {
                         const id = evt.item.getAttribute('data-id');
                         const from = evt.from.getAttribute('data-group');
                         const to = evt.to.getAttribute('data-group');
-                        if (to !== from) saveMove(id, to);
+                        if (id && to !== from) saveMove(id, to);
                     }
-                });
+                }));
             });
 
-            // Column drag-and-drop functionality
-            new Sortable(board, {
+            columnSortable = new Sortable(board, {
                 animation: 200,
+                draggable: '.column-card',
                 handle: '.column-drag-handle',
                 ghostClass: 'sortable-ghost',
-                filter: 'input, button', // Prevents dragging when clicking inputs or buttons inside the header
-                preventOnFilter: false
+                filter: 'input, button, textarea, select',
+                preventOnFilter: false,
+                onEnd: () => saveColumnOrder()
             });
+        }
+
+        function saveColumnOrder() {
+            ensureBoardState();
+            const orderedGroups = Array.from(document.querySelectorAll('#board .kanban-column'))
+                .map(column => column.dataset.group)
+                .filter(Boolean);
+            if (orderedGroups.length === 0) return;
+
+            groups[currentSubject][currentGrade] = orderedGroups;
+            if (!inAppsScript()) return;
+
+            google.script.run
+                .withSuccessHandler((result) => {
+                    if (result && result.groups) groups[currentSubject][currentGrade] = result.groups;
+                })
+                .withFailureHandler(() => {
+                    toast('Column order failed — reloading', 'err');
+                    refreshData();
+                })
+                .updateGroupOrder(currentSubject, currentGrade, orderedGroups);
         }
 
         function renderCards(list) {
@@ -360,23 +439,27 @@
                 const flag = (key, label) => `<span class="${FLAG_STYLES[key]} px-1.5 py-0.5 rounded text-[8px] font-bold">${label}</span>`;
                 const scale = s[currentSubject].scale;
                 return `
-                <div data-id="${s.id}" onclick="openModal('${s.id}')" class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 cursor-grab hover:border-blue-400 hover:shadow-md transition-all">
+                <div data-id="${escapeAttr(s.id)}" onclick="openModalFromCard(this)" class="student-card bg-white p-4 rounded-xl shadow-sm border border-slate-200 cursor-grab hover:border-blue-400 hover:shadow-md transition-all">
                     <div class="flex justify-between items-center mb-2 pointer-events-none">
-                        <span class="text-[9px] font-mono text-slate-400">ID: ${s.id}</span>
+                        <span class="text-[9px] font-mono text-slate-400">ID: ${escapeHtml(s.id)}</span>
                         <div class="flex space-x-1">
                             ${s.sped === 'Yes' ? flag('SPED', 'SPED') : ''}
                             ${s.el === 'Yes' ? flag('EL', 'EL') : ''}
                             ${s.five04 === 'Yes' ? flag('504', '504') : ''}
                         </div>
                     </div>
-                    <div class="font-bold text-slate-800 text-xs pointer-events-none">${s.name}</div>
-                    <div class="text-[10px] text-slate-400 mt-1 pointer-events-none">${s.team || 'No Team'}</div>
+                    <div class="font-bold text-slate-800 text-xs pointer-events-none">${escapeHtml(s.name)}</div>
+                    <div class="text-[10px] text-slate-400 mt-1 pointer-events-none">${escapeHtml(s.team || 'No Team')}</div>
                     <div class="mt-3 flex items-center justify-between pointer-events-none">
-                        <div class="text-[9px] bg-slate-50 px-2 py-1 rounded text-slate-500">${currentSubject} Scale: <span class="font-bold text-blue-600">${scale || '--'}</span></div>
+                        <div class="text-[9px] bg-slate-50 px-2 py-1 rounded text-slate-500">${currentSubject} Scale: <span class="font-bold text-blue-600">${escapeHtml(scale || '--')}</span></div>
                         <div class="text-[9px] text-slate-400">Abs: <span class="${s.absences > 5 ? 'text-red-500 font-bold' : ''}">${s.absences}</span></div>
                     </div>
                 </div>`;
             }).join('');
+        }
+
+        function openModalFromCard(card) {
+            openModal(card.dataset.id);
         }
 
         function openModal(id) {
@@ -426,7 +509,7 @@
                 </div>`;
 
             const select = document.getElementById('modal-group-select');
-            select.innerHTML = boardColumns().map(g => `<option value="${g}" ${g === s[currentSubject].group ? 'selected' : ''}>${g}</option>`).join('');
+            select.innerHTML = boardColumns().map(g => `<option value="${escapeAttr(g)}" ${g === s[currentSubject].group ? 'selected' : ''}>${escapeHtml(g)}</option>`).join('');
 
             document.getElementById('note-input').value = '';
             loadNotes(id);
@@ -510,6 +593,10 @@
 
         function escapeHtml(str) {
             return String(str).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        }
+
+        function escapeAttr(str) {
+            return escapeHtml(str);
         }
     </script>
 </body>

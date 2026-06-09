@@ -187,14 +187,19 @@ function addGroup(subject, grade, groupName) {
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
+    if (SUBJECTS.indexOf(subject) === -1) throw new Error('Unknown subject: ' + subject);
+    const cleanGrade = str_(grade) || 'Unassigned';
+    const cleanGroup = str_(groupName);
+    if (!cleanGroup) throw new Error('Group name is required.');
+
     const groups = loadGroups_();
     if (!groups[subject]) groups[subject] = {};
-    if (!groups[subject][grade]) groups[subject][grade] = DEFAULT_GROUPS.slice();
-    if (!groups[subject][grade].includes(groupName)) {
-      groups[subject][grade].push(groupName);
+    if (!groups[subject][cleanGrade]) groups[subject][cleanGrade] = DEFAULT_GROUPS.slice();
+    if (!groups[subject][cleanGrade].includes(cleanGroup)) {
+      groups[subject][cleanGrade].push(cleanGroup);
       saveGroups_(groups);
     }
-    return { success: true };
+    return { success: true, groups: groups[subject][cleanGrade] };
   } finally {
     lock.releaseLock();
   }
@@ -249,6 +254,38 @@ function setGroupColor(subject, grade, groupName, color) {
     colors[subject][grade][groupName] = color;
     saveColors_(colors);
     return { success: true };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function updateGroupOrder(subject, grade, orderedGroups) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    if (SUBJECTS.indexOf(subject) === -1) throw new Error('Unknown subject: ' + subject);
+    const cleanGrade = str_(grade) || 'Unassigned';
+    const requested = Array.isArray(orderedGroups) ? orderedGroups : [];
+    const seen = {};
+    const cleanOrder = requested
+      .map(str_)
+      .filter(name => {
+        if (!name || seen[name]) return false;
+        seen[name] = true;
+        return true;
+      });
+    if (cleanOrder.length === 0) throw new Error('Column order is empty.');
+
+    const groups = loadGroups_();
+    if (!groups[subject]) groups[subject] = {};
+    const existing = groups[subject][cleanGrade] || DEFAULT_GROUPS.slice();
+    existing.forEach(name => {
+      if (cleanOrder.indexOf(name) === -1) cleanOrder.push(name);
+    });
+
+    groups[subject][cleanGrade] = cleanOrder;
+    saveGroups_(groups);
+    return { success: true, groups: cleanOrder };
   } finally {
     lock.releaseLock();
   }
