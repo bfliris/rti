@@ -11,6 +11,7 @@
         .sidebar { transition: transform 0.3s ease-in-out; }
         .sidebar-closed { transform: translateX(-100%); }
         #toast { transition: opacity 0.3s ease, transform 0.3s ease; }
+        #print-root { display: none; }
         ::-webkit-scrollbar { width: 8px; height: 8px; }
         ::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 10px; }
         ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
@@ -18,13 +19,28 @@
 
         @media print {
             @page { size: landscape; margin: 10mm; }
-            body { background: white !important; overflow: visible !important; }
-            #sidebar, header, .loading-overlay, #toast, .group\/header button, .group\/header input { display: none !important; }
-            .lg\:ml-64 { margin-left: 0 !important; }
-            main { padding: 0 !important; overflow: visible !important; width: 100% !important; display: block !important; }
-            #board { display: flex !important; flex-wrap: wrap !important; width: 100% !important; overflow: visible !important; gap: 15px; height: auto !important; }
-            #board > div { width: 48% !important; page-break-inside: avoid; break-inside: avoid-page; margin-bottom: 20px; max-height: none !important; }
-            .kanban-column { min-height: auto !important; overflow-y: visible !important; }
+            body { background: white !important; display: block !important; overflow: visible !important; }
+            body > :not(#print-root) { display: none !important; }
+            #print-root { display: block !important; color: #1e293b; font-family: Arial, sans-serif; }
+            .print-header { border-bottom: 1px solid #cbd5e1; margin-bottom: 12px; padding-bottom: 8px; }
+            .print-title { font-size: 18px; font-weight: 700; margin: 0; }
+            .print-subtitle { color: #64748b; font-size: 11px; margin: 3px 0 0; }
+            .print-board { align-items: start; display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+            .print-column { border: 1px solid #cbd5e1; border-radius: 10px; break-inside: avoid; overflow: hidden; page-break-inside: avoid; }
+            .print-column-header { align-items: center; border-bottom: 1px solid #cbd5e1; display: flex; justify-content: space-between; padding: 6px 8px; }
+            .print-column-title { font-size: 10px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; }
+            .print-count { background: white; border: 1px solid #cbd5e1; border-radius: 999px; font-size: 9px; font-weight: 800; padding: 1px 6px; }
+            .print-cards { display: grid; gap: 6px; padding: 7px; }
+            .print-empty { border: 1px dashed #cbd5e1; border-radius: 8px; color: #94a3b8; font-size: 10px; font-style: italic; padding: 12px; text-align: center; }
+            .print-card { background: white; border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px; position: relative; }
+            .print-card-id { color: #94a3b8; font-size: 8px; font-family: monospace; padding-right: 42px; }
+            .print-card-name { color: #1e293b; font-size: 11px; font-weight: 800; line-height: 1.25; padding-right: 42px; }
+            .print-card-team { color: #64748b; font-size: 9px; margin-top: 2px; }
+            .print-card-meta { align-items: center; color: #64748b; display: flex; font-size: 8px; justify-content: space-between; margin-top: 7px; }
+            .print-flags { display: flex; gap: 3px; margin-top: 5px; }
+            .print-flag { border-radius: 4px; font-size: 7px; font-weight: 800; padding: 1px 4px; }
+            .print-badges { display: flex; gap: 3px; position: absolute; right: 7px; top: 7px; }
+            .print-badge { align-items: center; border: 1px solid; border-radius: 999px; display: flex; font-size: 10px; font-weight: 900; height: 20px; justify-content: center; width: 20px; }
             * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
         }
     </style>
@@ -72,7 +88,7 @@
                 </div>
             </div>
             <div class="flex items-center space-x-3">
-                <button onclick="window.print()" class="bg-slate-800 hover:bg-slate-900 text-white px-4 py-2 rounded-lg text-sm font-semibold transition flex items-center shadow-sm" title="Print Current Board">
+                <button onclick="printCurrentGrade()" class="bg-slate-800 hover:bg-slate-900 text-white px-4 py-2 rounded-lg text-sm font-semibold transition flex items-center shadow-sm" title="Print Current Board">
                     <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" /></svg>
                     Print
                 </button>
@@ -89,6 +105,8 @@
             <div id="board" class="flex flex-row flex-nowrap space-x-6 items-start h-full pb-8 w-max min-w-full"></div>
         </main>
     </div>
+
+    <div id="print-root"></div>
 
     <div id="student-modal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex justify-center items-center p-4 opacity-0 transition-opacity duration-300">
         <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden flex flex-col transform transition-transform scale-95 duration-300" id="student-modal-content">
@@ -141,6 +159,25 @@
         const FLAG_STYLES = { SPED: 'bg-red-100 text-red-700', EL: 'bg-amber-100 text-amber-700', '504': 'bg-purple-100 text-purple-700' };
         const COLOR_KEYS = ['slate', 'red', 'yellow', 'green', 'blue'];
         const SWATCH = { slate: 'bg-slate-300 border-slate-400', red: 'bg-red-400 border-red-500', yellow: 'bg-yellow-400 border-yellow-500', green: 'bg-green-400 border-green-500', blue: 'bg-blue-400 border-blue-500' };
+        const PRINT_THEMES = {
+            slate:  { bg: '#f8fafc', border: '#cbd5e1', header: '#f1f5f9', text: '#475569' },
+            red:    { bg: '#fef2f2', border: '#fecaca', header: '#fee2e2', text: '#b91c1c' },
+            yellow: { bg: '#fefce8', border: '#fde68a', header: '#fef3c7', text: '#a16207' },
+            green:  { bg: '#f0fdf4', border: '#bbf7d0', header: '#dcfce7', text: '#15803d' },
+            blue:   { bg: '#eff6ff', border: '#bfdbfe', header: '#dbeafe', text: '#1d4ed8' }
+        };
+        const PRINT_LEVEL_BADGES = {
+            slate:  { bg: '#f1f5f9', border: '#cbd5e1', text: '#475569' },
+            red:    { bg: '#fee2e2', border: '#fecaca', text: '#b91c1c' },
+            yellow: { bg: '#fef3c7', border: '#fde68a', text: '#a16207' },
+            green:  { bg: '#dcfce7', border: '#bbf7d0', text: '#15803d' },
+            blue:   { bg: '#dbeafe', border: '#bfdbfe', text: '#1d4ed8' }
+        };
+        const PRINT_FLAG_STYLES = {
+            SPED: 'background:#fee2e2;color:#b91c1c;',
+            EL: 'background:#fef3c7;color:#b45309;',
+            '504': 'background:#f3e8ff;color:#7e22ce;'
+        };
         const LEVEL_BADGE_STYLES = {
             slate: 'bg-slate-100 border-slate-200 text-slate-500',
             red: 'bg-red-100 border-red-200 text-red-700',
@@ -150,6 +187,8 @@
         };
 
         window.onload = refreshData;
+        window.addEventListener('beforeprint', () => { if (currentGrade) buildPrintView(); });
+        window.addEventListener('afterprint', clearPrintView);
 
         function toggleSidebar() {
             const sb = document.getElementById('sidebar');
@@ -294,6 +333,100 @@
             const level = student[subject] && student[subject].level;
             const color = levelColor(subject, level);
             return `<span class="h-6 w-6 rounded-full border ${LEVEL_BADGE_STYLES[color]} flex items-center justify-center text-xs font-black shadow-sm" title="${subject}: ${escapeAttr(level || 'No BOY level')}">${label}</span>`;
+        }
+
+        function printCurrentGrade() {
+            if (!currentGrade) {
+                alert('Select a grade before printing.');
+                return;
+            }
+            buildPrintView();
+            window.print();
+        }
+
+        function clearPrintView() {
+            const root = document.getElementById('print-root');
+            if (root) root.innerHTML = '';
+        }
+
+        function inlineStyle(obj) {
+            return Object.keys(obj).map(key => `${key}:${obj[key]}`).join(';');
+        }
+
+        function printLevelBadge(student, subject, label) {
+            const level = student[subject] && student[subject].level;
+            const color = PRINT_LEVEL_BADGES[levelColor(subject, level)] || PRINT_LEVEL_BADGES.slate;
+            const style = inlineStyle({ background: color.bg, 'border-color': color.border, color: color.text });
+            return `<span class="print-badge" style="${style}" title="${subject}: ${escapeAttr(level || 'No BOY level')}">${label}</span>`;
+        }
+
+        function printFlags(student) {
+            return [
+                student.sped === 'Yes' ? `<span class="print-flag" style="${PRINT_FLAG_STYLES.SPED}">SPED</span>` : '',
+                student.el === 'Yes' ? `<span class="print-flag" style="${PRINT_FLAG_STYLES.EL}">EL</span>` : '',
+                student.five04 === 'Yes' ? `<span class="print-flag" style="${PRINT_FLAG_STYLES['504']}">504</span>` : ''
+            ].filter(Boolean).join('');
+        }
+
+        function renderPrintCard(student) {
+            const scale = student[currentSubject].scale;
+            const flags = printFlags(student);
+            return `
+                <div class="print-card">
+                    <div class="print-badges">
+                        ${printLevelBadge(student, 'ELA', 'E')}
+                        ${printLevelBadge(student, 'Math', 'M')}
+                    </div>
+                    <div class="print-card-id">ID: ${escapeHtml(student.id)}</div>
+                    <div class="print-card-name">${escapeHtml(student.name)}</div>
+                    <div class="print-card-team">${escapeHtml(student.team || 'No Team')}</div>
+                    ${flags ? `<div class="print-flags">${flags}</div>` : ''}
+                    <div class="print-card-meta">
+                        <span>${currentSubject} Scale: <strong>${escapeHtml(scale || '--')}</strong></span>
+                        <span>Abs: <strong>${student.absences}</strong></span>
+                    </div>
+                </div>`;
+        }
+
+        function buildPrintView() {
+            const root = document.getElementById('print-root');
+            if (!root || !currentGrade) return;
+
+            const cols = boardColumns();
+            const colColors = columnColors();
+            const gradeStudents = students.filter(s => s.grade === currentGrade);
+
+            const columnsHtml = cols.map(group => {
+                const theme = PRINT_THEMES[colColors[group] || 'slate'] || PRINT_THEMES.slate;
+                const inColumn = gradeStudents
+                    .filter(s => s[currentSubject].group === group)
+                    .sort((a, b) => scaleOf(a) - scaleOf(b));
+                const columnStyle = inlineStyle({ background: theme.bg, 'border-color': theme.border });
+                const headerStyle = inlineStyle({ background: theme.header, 'border-color': theme.border, color: theme.text });
+                const cardsHtml = inColumn.length
+                    ? inColumn.map(renderPrintCard).join('')
+                    : '<div class="print-empty">Empty</div>';
+
+                return `
+                    <section class="print-column" style="${columnStyle}">
+                        <div class="print-column-header" style="${headerStyle}">
+                            <div class="print-column-title">${escapeHtml(group)}</div>
+                            <div class="print-count">${inColumn.length}</div>
+                        </div>
+                        <div class="print-cards">${cardsHtml}</div>
+                    </section>`;
+            }).join('');
+
+            root.innerHTML = `
+                <section>
+                    <div class="print-header">
+                        <h1 class="print-title">Grade ${escapeHtml(currentGrade)} - ${escapeHtml(currentSubject)} Groups</h1>
+                        <p class="print-subtitle">${gradeStudents.length} students across ${cols.length} columns</p>
+                    </div>
+                    <div class="print-board">
+                        ${columnsHtml || '<div class="print-empty">No columns available for this grade.</div>'}
+                    </div>
+                </section>`;
         }
 
         function addGroupPrompt() {
