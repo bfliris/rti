@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <base target="_top">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
+    <style>
+        .kanban-column { min-height: 60vh; transition: background-color 0.2s ease; }
+        .sortable-ghost { opacity: 0.4; background-color: #cbd5e1 !important; }
+        .loading-overlay { display: none; position: fixed; inset: 0; background: rgba(255,255,255,0.7); z-index: 1000; justify-content: center; align-items: center; }
+        .sidebar { transition: transform 0.3s ease-in-out; }
+        .sidebar-closed { transform: translateX(-100%); }
+        #toast { transition: opacity 0.3s ease, transform 0.3s ease; }
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+        @media print {
+            @page { size: landscape; margin: 10mm; }
+            body { background: white !important; overflow: visible !important; }
+            #sidebar, header, .loading-overlay, #toast, .group\/header button { display: none !important; }
+            .lg\:ml-64 { margin-left: 0 !important; }
+            main { padding: 0 !important; overflow: visible !important; width: 100% !important; display: block !important; }
+            #board { display: flex !important; flex-wrap: wrap !important; width: 100% !important; overflow: visible !important; gap: 15px; height: auto !important; }
+            #board > div { width: 48% !important; page-break-inside: avoid; break-inside: avoid-page; margin-bottom: 20px; max-height: none !important; }
+            .kanban-column { min-height: auto !important; overflow-y: visible !important; }
+            * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+        }
+    </style>
+</head>
+<body class="bg-slate-50 min-h-screen flex overflow-hidden w-full">
+
+    <div id="loading" class="loading-overlay">
+        <div class="flex flex-col items-center">
+            <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mb-4"></div>
+            <p class="text-slate-600 font-medium text-center" id="loading-text">Connecting to Google Sheets...</p>
+        </div>
+    </div>
+
+    <div id="toast" class="fixed bottom-6 right-6 z-[200] px-4 py-2.5 rounded-xl shadow-lg text-sm font-semibold text-white opacity-0 translate-y-2 pointer-events-none">Saved</div>
+
+    <!-- Grade tray -->
+    <aside id="sidebar" class="sidebar fixed inset-y-0 left-0 w-64 bg-slate-900 text-white z-50 shadow-2xl flex flex-col lg:translate-x-0">
+        <div class="p-6 border-b border-slate-800 flex justify-between items-center">
+            <div>
+                <h2 class="text-xl font-bold text-white">RTI / MTSS</h2>
+                <p class="text-xs text-slate-400 mt-1">Grade Level Tray</p>
+            </div>
+            <button onclick="toggleSidebar()" class="lg:hidden text-slate-400 hover:text-white text-xl">&times;</button>
+        </div>
+        <nav id="grade-nav" class="flex-grow p-4 space-y-2 overflow-y-auto">
+            <div class="text-slate-500 text-sm animate-pulse">Scanning for grades...</div>
+        </nav>
+        <div class="p-4 border-t border-slate-800 text-[10px] text-slate-500 uppercase tracking-widest font-semibold text-center">
+            RTI System v3.0
+        </div>
+    </aside>
+
+    <!-- Main -->
+    <div class="flex-grow lg:ml-64 flex flex-col h-screen w-full overflow-hidden">
+        <header class="bg-white border-b p-4 flex justify-between items-center shadow-sm z-40 shrink-0">
+            <div class="flex items-center space-x-4">
+                <button onclick="toggleSidebar()" class="lg:hidden bg-slate-100 hover:bg-slate-200 p-2 rounded-md transition">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16m-7 6h7" /></svg>
+                </button>
+                <div>
+                    <h1 class="text-lg font-bold text-slate-800 leading-tight" id="current-view-title">System Status</h1>
+                    <p class="text-xs text-slate-500" id="student-count">Initializing...</p>
+                </div>
+                <!-- Subject toggle -->
+                <div id="subject-toggle" class="hidden sm:flex bg-slate-100 rounded-lg p-1 ml-2">
+                    <button data-subject="ELA"  onclick="setSubject('ELA')"  class="px-3 py-1.5 rounded-md text-sm font-semibold transition">ELA</button>
+                    <button data-subject="Math" onclick="setSubject('Math')" class="px-3 py-1.5 rounded-md text-sm font-semibold transition">Math</button>
+                </div>
+            </div>
+            <div class="flex items-center space-x-3">
+                <button onclick="window.print()" class="bg-slate-800 hover:bg-slate-900 text-white px-4 py-2 rounded-lg text-sm font-semibold transition flex items-center shadow-sm" title="Print Current Board">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" /></svg>
+                    Print
+                </button>
+                <button onclick="addGroupPrompt()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-semibold transition flex items-center shadow-sm">
+                    <span class="mr-1">+</span> New Column
+                </button>
+                <button onclick="refreshData()" class="bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 p-2 rounded-lg transition shadow-sm" title="Refresh Data">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                </button>
+            </div>
+        </header>
+
+        <main class="flex-1 overflow-x-auto overflow-y-auto p-6 bg-slate-50 relative w-full">
+            <div id="board" class="flex flex-row flex-nowrap space-x-6 items-start h-full pb-8 w-max min-w-full"></div>
+        </main>
+    </div>
+
+    <!-- Student modal -->
+    <div id="student-modal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex justify-center items-center p-4 opacity-0 transition-opacity duration-300">
+        <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden flex flex-col transform transition-transform scale-95 duration-300" id="student-modal-content">
+            <div class="bg-blue-600 p-4 flex justify-between items-center text-white">
+                <div class="flex flex-col">
+                    <h3 class="font-bold text-lg leading-tight" id="modal-name">Student Name</h3>
+                    <span class="text-blue-200 text-xs font-mono mt-1" id="modal-id">ID: 000</span>
+                </div>
+                <button onclick="closeModal()" class="hover:bg-blue-700 p-2 rounded-lg transition bg-blue-700/50">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                </button>
+            </div>
+            <div class="p-6 overflow-y-auto max-h-[80vh] space-y-5">
+                <div class="grid grid-cols-2 gap-4" id="modal-details"></div>
+
+                <!-- Reassign current-subject group without dragging -->
+                <div class="bg-slate-50 p-3 rounded-lg border border-slate-100">
+                    <label class="block text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1.5" id="modal-reassign-label">Reassign Group</label>
+                    <select id="modal-group-select" onchange="reassignFromModal(this.value)" class="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white focus:ring-2 focus:ring-blue-500 outline-none"></select>
+                </div>
+
+                <!-- Notes -->
+                <div>
+                    <div class="flex items-center justify-between mb-2">
+                        <h4 class="text-[11px] text-slate-500 uppercase font-bold tracking-widest">Intervention Notes</h4>
+                    </div>
+                    <div id="notes-list" class="space-y-2 max-h-48 overflow-y-auto mb-3"></div>
+                    <textarea id="note-input" rows="2" placeholder="Add a note for this student…" class="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none resize-none"></textarea>
+                    <button onclick="submitNote()" class="mt-2 w-full bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold py-2 rounded-lg transition">Add Note</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let students = [];
+        let groups = {};
+        let colors = {};
+        let currentGrade = localStorage.getItem('rtiGrade') || null;
+        let currentSubject = localStorage.getItem('rtiSubject') || 'ELA';
+        let activeStudentId = null;
+
+        const COLUMN_THEMES = {
+            slate:  { bg: 'bg-slate-200/40',  border: 'border-slate-200/60',  headerBg: 'bg-white/50',     text: 'text-slate-500' },
+            red:    { bg: 'bg-red-100/50',     border: 'border-red-200/60',    headerBg: 'bg-red-50/80',    text: 'text-red-700'   },
+            yellow: { bg: 'bg-yellow-100/50',  border: 'border-yellow-200/60', headerBg: 'bg-yellow-50/80', text: 'text-yellow-700'},
+            green:  { bg: 'bg-green-100/50',   border: 'border-green-200/60',  headerBg: 'bg-green-50/80',  text: 'text-green-700' },
+            blue:   { bg: 'bg-blue-100/50',    border: 'border-blue-200/60',   headerBg: 'bg-blue-50/80',   text: 'text-blue-700'  }
+        };
+        // Static, complete class strings so the Tailwind CDN actually generates them.
+        const FLAG_STYLES = { SPED: 'bg-red-100 text-red-700', EL: 'bg-amber-100 text-amber-700', '504': 'bg-purple-100 text-purple-700' };
+        const COLOR_KEYS = ['slate', 'red', 'yellow', 'green', 'blue'];
+        const SWATCH = { slate: 'bg-slate-300 border-slate-400', red: 'bg-red-400 border-red-500', yellow: 'bg-yellow-400 border-yellow-500', green: 'bg-green-400 border-green-500', blue: 'bg-blue-400 border-blue-500' };
+
+        window.onload = refreshData;
+
+        function toggleSidebar() {
+            const sb = document.getElementById('sidebar');
+            sb.classList.toggle('sidebar-closed');
+            sb.classList.toggle('lg:translate-x-0');
+        }
+
+        function showLoading(show, text = 'Syncing with Sheet...') {
+            document.getElementById('loading').style.display = show ? 'flex' : 'none';
+            document.getElementById('loading-text').innerText = text;
+        }
+
+        let toastTimer = null;
+        function toast(message, kind) {
+            const t = document.getElementById('toast');
+            const colorByKind = { pending: 'bg-slate-700', ok: 'bg-green-600', err: 'bg-red-600' };
+            t.className = t.className.replace(/bg-\S+/g, '');
+            t.classList.add(colorByKind[kind] || 'bg-slate-700');
+            t.innerText = message;
+            t.style.opacity = '1';
+            t.style.transform = 'translateY(0)';
+            clearTimeout(toastTimer);
+            if (kind !== 'pending') {
+                toastTimer = setTimeout(() => { t.style.opacity = '0'; t.style.transform = 'translateY(0.5rem)'; }, 1800);
+            }
+        }
+
+        function inAppsScript() { return typeof google !== 'undefined' && google.script && google.script.run; }
+
+        function refreshData() {
+            showLoading(true);
+            if (!inAppsScript()) {
+                showLoading(false);
+                alert('Open this through your Google Apps Script web-app URL.');
+                return;
+            }
+            google.script.run
+                .withSuccessHandler((data) => {
+                    students = data.students || [];
+                    groups = data.groups || {};
+                    colors = data.colors || {};
+
+                    if (students.length === 0) {
+                        document.getElementById('grade-nav').innerHTML = '<div class="text-slate-500 p-2 text-sm text-center">No data in sheet. Run setupSheets() once, then add students.</div>';
+                        showLoading(false);
+                        return;
+                    }
+
+                    const grades = availableGrades();
+                    if (!currentGrade || !grades.includes(currentGrade)) currentGrade = grades[0];
+
+                    renderSubjectToggle();
+                    renderSidebar();
+                    renderBoard();
+                    showLoading(false);
+                })
+                .withFailureHandler((err) => { showLoading(false); alert('Error: ' + err.message); })
+                .getData();
+        }
+
+        function availableGrades() { return [...new Set(students.map(s => s.grade))].sort(); }
+
+        function renderSubjectToggle() {
+            const wrap = document.getElementById('subject-toggle');
+            wrap.classList.remove('hidden');
+            wrap.querySelectorAll('button').forEach(btn => {
+                const active = btn.dataset.subject === currentSubject;
+                btn.className = 'px-3 py-1.5 rounded-md text-sm font-semibold transition ' +
+                    (active ? 'bg-white text-blue-700 shadow' : 'text-slate-500 hover:text-slate-700');
+            });
+        }
+
+        function setSubject(subject) {
+            currentSubject = subject;
+            localStorage.setItem('rtiSubject', subject);
+            renderSubjectToggle();
+            renderBoard();
+        }
+
+        function renderSidebar() {
+            const nav = document.getElementById('grade-nav');
+            nav.innerHTML = availableGrades().map(grade => `
+                <button onclick="setGrade('${grade}')" class="w-full text-left px-4 py-3 rounded-xl transition flex justify-between items-center ${currentGrade === grade ? 'bg-blue-600 text-white shadow-lg ring-4 ring-blue-600/20' : 'hover:bg-slate-800 text-slate-400'}">
+                    <span class="font-bold">${grade === 'Unassigned' ? 'No Grade' : 'Grade ' + grade}</span>
+                    <span class="text-xs opacity-60">${students.filter(s => s.grade === grade).length}</span>
+                </button>
+            `).join('');
+        }
+
+        function setGrade(grade) {
+            currentGrade = grade;
+            localStorage.setItem('rtiGrade', grade);
+            renderSidebar();
+            renderBoard();
+            if (window.innerWidth < 1024) toggleSidebar();
+        }
+
+        function boardColumns() {
+            return (groups[currentSubject] && groups[currentSubject][currentGrade]) || ['Unassigned', 'Tier 1', 'Tier 2', 'Tier 3'];
+        }
+        function columnColors() {
+            return (colors[currentSubject] && colors[currentSubject][currentGrade]) || {};
+        }
+        function scaleOf(student) {
+            const v = Number(student[currentSubject].scale);
+            return isNaN(v) ? Infinity : v; // blanks sink to the bottom
+        }
+
+        function addGroupPrompt() {
+            if (!currentGrade) { alert('Select a grade first.'); return; }
+            const name = prompt(`New ${currentSubject} column for Grade ${currentGrade}:`);
+            if (!name || !name.trim()) return;
+            if (boardColumns().includes(name.trim())) { alert('That column already exists.'); return; }
+            showLoading(true, 'Creating column...');
+            google.script.run
+                .withSuccessHandler(() => refreshData())
+                .withFailureHandler((err) => { alert('Failed to add: ' + err); showLoading(false); })
+                .addGroup(currentSubject, currentGrade, name.trim());
+        }
+
+        function renameGroupPrompt(oldName) {
+            const newName = prompt(`Rename "${oldName}" (${currentSubject}, Grade ${currentGrade}) to:`, oldName);
+            if (!newName || !newName.trim() || newName === oldName) return;
+            showLoading(true, 'Renaming...');
+            google.script.run
+                .withSuccessHandler(() => refreshData())
+                .withFailureHandler((err) => { alert('Failed to rename: ' + err); showLoading(false); })
+                .renameGroup(currentSubject, currentGrade, oldName, newName.trim());
+        }
+
+        function setGroupColor(groupName, color) {
+            if (!colors[currentSubject]) colors[currentSubject] = {};
+            if (!colors[currentSubject][currentGrade]) colors[currentSubject][currentGrade] = {};
+            colors[currentSubject][currentGrade][groupName] = color;
+            renderBoard(); // optimistic
+            google.script.run
+                .withFailureHandler((err) => alert('Failed to save color: ' + err))
+                .setGroupColor(currentSubject, currentGrade, groupName, color);
+        }
+
+        function renderBoard() {
+            const board = document.getElementById('board');
+            board.innerHTML = '';
+            if (!currentGrade) return;
+
+            const gradeStudents = students.filter(s => s.grade === currentGrade);
+            document.getElementById('current-view-title').innerText = `Grade ${currentGrade} · ${currentSubject}`;
+            document.getElementById('student-count').innerText = `${gradeStudents.length} students`;
+
+            const cols = boardColumns();
+            const colColors = columnColors();
+
+            cols.forEach(group => {
+                const theme = COLUMN_THEMES[colColors[group] || 'slate'] || COLUMN_THEMES.slate;
+                const inColumn = gradeStudents
+                    .filter(s => s[currentSubject].group === group)
+                    .sort((a, b) => scaleOf(a) - scaleOf(b));
+
+                const colDiv = document.createElement('div');
+                colDiv.className = `flex-shrink-0 w-80 rounded-2xl border flex flex-col shadow-sm max-h-full transition-colors duration-300 ${theme.bg} ${theme.border}`;
+                colDiv.innerHTML = `
+                    <div class="p-4 flex flex-col border-b border-slate-200/50 rounded-t-2xl group/header transition-colors hover:bg-white/60 ${theme.headerBg}">
+                        <div class="flex justify-between items-center mb-2">
+                            <h2 class="font-bold uppercase text-[11px] tracking-widest flex items-center gap-2 ${theme.text}">
+                                ${group}
+                                ${group !== 'Unassigned' ? `<button onclick="renameGroupPrompt('${group.replace(/'/g, "\\'")}')" title="Rename" class="opacity-50 hover:opacity-100 transition-opacity">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" /></svg>
+                                </button>` : ''}
+                            </h2>
+                            <span class="bg-white px-2 py-0.5 rounded-full text-[10px] font-black border shadow-sm border-slate-200 ${theme.text}">${inColumn.length}</span>
+                        </div>
+                        <div class="flex space-x-1.5 opacity-0 group-hover/header:opacity-100 transition-opacity">
+                            ${COLOR_KEYS.map(c => `<button onclick="setGroupColor('${group.replace(/'/g, "\\'")}', '${c}')" class="w-3 h-3 rounded-full ${SWATCH[c]} border hover:scale-110 shadow-sm" title="${c}"></button>`).join('')}
+                        </div>
+                    </div>
+                    <div data-group="${group}" class="kanban-column p-3 space-y-3 flex-grow overflow-y-auto min-h-[100px]">
+                        ${renderCards(inColumn)}
+                    </div>
+                `;
+                board.appendChild(colDiv);
+
+                new Sortable(colDiv.querySelector('.kanban-column'), {
+                    group: 'rti-students',
+                    animation: 200,
+                    ghostClass: 'sortable-ghost',
+                    onEnd: (evt) => {
+                        const id = evt.item.getAttribute('data-id');
+                        const from = evt.from.getAttribute('data-group');
+                        const to = evt.to.getAttribute('data-group');
+                        if (to !== from) saveMove(id, to);
+                    }
+                });
+            });
+        }
+
+        function renderCards(list) {
+            if (list.length === 0) return `<div class="text-center py-6 text-slate-300 text-[10px] italic border border-dashed rounded-xl border-slate-200">Empty</div>`;
+            return list.map(s => {
+                const flag = (key, label) => `<span class="${FLAG_STYLES[key]} px-1.5 py-0.5 rounded text-[8px] font-bold">${label}</span>`;
+                const scale = s[currentSubject].scale;
+                return `
+                <div data-id="${s.id}" onclick="openModal('${s.id}')" class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 cursor-grab hover:border-blue-400 hover:shadow-md transition-all">
+                    <div class="flex justify-between items-center mb-2 pointer-events-none">
+                        <span class="text-[9px] font-mono text-slate-400">ID: ${s.id}</span>
+                        <div class="flex space-x-1">
+                            ${s.sped === 'Yes' ? flag('SPED', 'SPED') : ''}
+                            ${s.el === 'Yes' ? flag('EL', 'EL') : ''}
+                            ${s.five04 === 'Yes' ? flag('504', '504') : ''}
+                        </div>
+                    </div>
+                    <div class="font-bold text-slate-800 text-xs pointer-events-none">${s.name}</div>
+                    <div class="text-[10px] text-slate-400 mt-1 pointer-events-none">${s.team || 'No Team'}</div>
+                    <div class="mt-3 flex items-center justify-between pointer-events-none">
+                        <div class="text-[9px] bg-slate-50 px-2 py-1 rounded text-slate-500">${currentSubject} Scale: <span class="font-bold text-blue-600">${scale || '--'}</span></div>
+                        <div class="text-[9px] text-slate-400">Abs: <span class="${s.absences > 5 ? 'text-red-500 font-bold' : ''}">${s.absences}</span></div>
+                    </div>
+                </div>`;
+            }).join('');
+        }
+
+        function openModal(id) {
+            const s = students.find(x => x.id === id);
+            if (!s) return;
+            activeStudentId = id;
+
+            document.getElementById('modal-name').innerText = s.name;
+            document.getElementById('modal-id').innerText = `ID: ${s.id} · Grade ${s.grade}`;
+            document.getElementById('modal-reassign-label').innerText = `Reassign ${currentSubject} Group`;
+
+            const subjCard = (subject) => {
+                const d = s[subject];
+                const active = subject === currentSubject;
+                return `
+                <div class="p-3 rounded-lg border col-span-2 ${active ? 'bg-blue-50 border-blue-200' : 'bg-slate-50 border-slate-100'}">
+                    <div class="flex items-center justify-between mb-1">
+                        <span class="text-[10px] uppercase font-bold tracking-wider ${active ? 'text-blue-700' : 'text-slate-400'}">${subject}</span>
+                        <span class="text-sm font-semibold text-slate-800">${d.group}</span>
+                    </div>
+                    <div class="flex items-center justify-between text-xs text-slate-500">
+                        <span>Level: <span class="font-semibold text-slate-700">${d.level || 'N/A'}</span></span>
+                        <span>Scale: <span class="font-semibold text-blue-600">${d.scale || 'N/A'}</span></span>
+                    </div>
+                </div>`;
+            };
+
+            const flags = [
+                s.sped === 'Yes' ? `<span class="bg-red-100 text-red-700 px-2 py-1 rounded text-[10px] font-bold">SPED</span>` : '',
+                s.el === 'Yes' ? `<span class="bg-amber-100 text-amber-700 px-2 py-1 rounded text-[10px] font-bold">EL</span>` : '',
+                s.five04 === 'Yes' ? `<span class="bg-purple-100 text-purple-700 px-2 py-1 rounded text-[10px] font-bold">504</span>` : ''
+            ].filter(Boolean).join(' ') || '<span class="text-slate-400 text-xs italic">None</span>';
+
+            document.getElementById('modal-details').innerHTML = `
+                ${subjCard('ELA')}
+                ${subjCard('Math')}
+                <div class="bg-slate-50 p-3 rounded-lg border border-slate-100">
+                    <span class="block text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1">Team</span>
+                    <span class="text-sm font-semibold text-slate-800">${s.team || 'N/A'}</span>
+                </div>
+                <div class="bg-slate-50 p-3 rounded-lg border border-slate-100">
+                    <span class="block text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1">Attendance</span>
+                    <span class="text-sm font-semibold text-slate-800"><span class="${s.absences > 5 ? 'text-red-600' : ''}">${s.absences} abs</span> · ${s.tardies} tardy</span>
+                </div>
+                <div class="bg-slate-50 p-3 rounded-lg border border-slate-100 col-span-2 flex items-center space-x-2">
+                    <span class="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Flags:</span> ${flags}
+                </div>`;
+
+            // Reassign dropdown for current subject.
+            const select = document.getElementById('modal-group-select');
+            select.innerHTML = boardColumns().map(g => `<option value="${g}" ${g === s[currentSubject].group ? 'selected' : ''}>${g}</option>`).join('');
+
+            // Notes
+            document.getElementById('note-input').value = '';
+            loadNotes(id);
+
+            const modal = document.getElementById('student-modal');
+            const content = document.getElementById('student-modal-content');
+            modal.classList.remove('hidden');
+            void modal.offsetWidth;
+            modal.classList.remove('opacity-0');
+            content.classList.remove('scale-95');
+        }
+
+        function closeModal() {
+            const modal = document.getElementById('student-modal');
+            const content = document.getElementById('student-modal-content');
+            modal.classList.add('opacity-0');
+            content.classList.add('scale-95');
+            setTimeout(() => modal.classList.add('hidden'), 300);
+            activeStudentId = null;
+        }
+
+        document.getElementById('student-modal').addEventListener('click', function (e) {
+            if (e.target === this) closeModal();
+        });
+
+        function loadNotes(id) {
+            const box = document.getElementById('notes-list');
+            box.innerHTML = '<div class="text-xs text-slate-400 italic">Loading notes…</div>';
+            if (!inAppsScript()) { box.innerHTML = '<div class="text-xs text-slate-400 italic">Notes appear in the deployed app.</div>'; return; }
+            google.script.run
+                .withSuccessHandler(renderNotes)
+                .withFailureHandler(() => box.innerHTML = '<div class="text-xs text-red-400">Could not load notes.</div>')
+                .getNotes(id);
+        }
+
+        function renderNotes(notes) {
+            const box = document.getElementById('notes-list');
+            if (!notes || notes.length === 0) {
+                box.innerHTML = '<div class="text-xs text-slate-400 italic">No notes yet.</div>';
+                return;
+            }
+            box.innerHTML = notes.map(n => `
+                <div class="bg-slate-50 border border-slate-100 rounded-lg p-2.5">
+                    <div class="flex items-center justify-between mb-1">
+                        <span class="text-[9px] font-bold uppercase tracking-wider ${n.subject === 'Math' ? 'text-emerald-600' : 'text-blue-600'}">${n.subject || '—'}</span>
+                        <span class="text-[9px] text-slate-400">${n.date}</span>
+                    </div>
+                    <div class="text-xs text-slate-700">${escapeHtml(n.note)}</div>
+                    ${n.author ? `<div class="text-[9px] text-slate-400 mt-1">${escapeHtml(n.author)}</div>` : ''}
+                </div>`).join('');
+        }
+
+        function submitNote() {
+            const text = document.getElementById('note-input').value.trim();
+            if (!text || !activeStudentId) return;
+            const s = students.find(x => x.id === activeStudentId);
+            document.getElementById('note-input').value = '';
+            toast('Saving note…', 'pending');
+            google.script.run
+                .withSuccessHandler(() => { toast('Note added', 'ok'); loadNotes(activeStudentId); })
+                .withFailureHandler((err) => { toast('Note failed', 'err'); alert('Failed: ' + err); })
+                .addNote(activeStudentId, s.name, s.grade, currentSubject, text);
+        }
+
+        function reassignFromModal(group) {
+            if (!activeStudentId) return;
+            saveMove(activeStudentId, group);
+        }
+
+        function saveMove(id, group) {
+            const s = students.find(x => x.id == id);
+            if (s) s[currentSubject].group = group;
+            renderBoard();
+            if (!inAppsScript()) return;
+            toast('Saving…', 'pending');
+            google.script.run
+                .withSuccessHandler(() => toast('Saved', 'ok'))
+                .withFailureHandler(() => { toast('Save failed — reloading', 'err'); refreshData(); })
+                .updateStudentGroup(id, currentSubject, group);
+        }
+
+        function escapeHtml(str) {
+            return String(str).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        }
+    </script>
+</body>
+</html>
