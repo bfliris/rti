@@ -67,6 +67,19 @@ function headerMap_(headerRow) {
 function str_(v) { return String(v == null ? '' : v).trim(); }
 function yn_(v)  { return str_(v).toLowerCase() === 'yes' ? 'Yes' : 'No'; }
 
+function pushUnique_(arr, value) {
+  const name = str_(value) || 'Unassigned';
+  if (arr.indexOf(name) === -1) arr.push(name);
+}
+
+function orderGroups_(sheetGroups, savedOrder) {
+  const current = sheetGroups || [];
+  const saved = savedOrder || [];
+  return saved
+    .filter(name => current.indexOf(name) !== -1)
+    .concat(current.filter(name => saved.indexOf(name) === -1));
+}
+
 function studentSheet_() {
   const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(STUDENT_SHEET);
   if (!sheet) throw new Error('Sheet "' + STUDENT_SHEET + '" not found. Run setupSheets() first.');
@@ -79,6 +92,47 @@ function loadGroups_()       { return loadJson_('rti_groups'); }
 function saveGroups_(o)      { saveJson_('rti_groups', o); }
 function loadColors_()       { return loadJson_('rti_colors'); }
 function saveColors_(o)      { saveJson_('rti_colors', o); }
+
+function sheetGroupsFromStudents_(students, savedGroups) {
+  const groups = {};
+
+  SUBJECTS.forEach(subject => {
+    groups[subject] = {};
+    students.forEach(student => {
+      const grade = str_(student.grade) || 'Unassigned';
+      if (!groups[subject][grade]) groups[subject][grade] = [];
+      pushUnique_(groups[subject][grade], student[subject].group);
+    });
+
+    Object.keys(groups[subject]).forEach(grade => {
+      const savedOrder = savedGroups[subject] && savedGroups[subject][grade];
+      groups[subject][grade] = orderGroups_(groups[subject][grade], savedOrder);
+    });
+  });
+
+  return groups;
+}
+
+function sheetGroupsFor_(subject, grade) {
+  const sheet = studentSheet_();
+  const values = sheet.getDataRange().getValues();
+  if (values.length <= 1) return [];
+
+  const col = headerMap_(values[0]);
+  const gradeCol = col[COL.grade];
+  const groupCol = col[subject + ' Group'];
+  if (gradeCol === undefined || groupCol === undefined) {
+    throw new Error('Missing required columns (Grade / ' + subject + ' Group).');
+  }
+
+  const cleanGrade = str_(grade) || 'Unassigned';
+  const groups = [];
+  for (let i = 1; i < values.length; i++) {
+    const rowGrade = str_(values[i][gradeCol]) || 'Unassigned';
+    if (rowGrade === cleanGrade) pushUnique_(groups, values[i][groupCol]);
+  }
+  return groups;
+}
 
 
 /* ─────────────────────────────── Read data ─────────────────────────────── */
@@ -95,7 +149,7 @@ function getData() {
   const values = sheet.getDataRange().getValues();
 
   if (values.length <= 1) {
-    return { students: [], groups: loadGroups_(), colors: loadColors_() };
+    return { students: [], groups: {}, colors: loadColors_() };
   }
 
   const col = headerMap_(values.shift());
@@ -123,31 +177,11 @@ function getData() {
       Math:     subjectBlock(r, 'Math')
     }));
 
-  // Reconcile stored board columns with what actually appears in the data.
-  const groups = loadGroups_();
+  // Visible board columns come from the sheet's ELA Group and Math Group
+  // values. Saved groups only preserve ordering for groups still in the sheet.
+  const savedGroups = loadGroups_();
+  const groups = sheetGroupsFromStudents_(students, savedGroups);
   const colors = loadColors_();
-  let dirty = false;
-  const grades = [...new Set(students.map(s => s.grade))];
-
-  SUBJECTS.forEach(subject => {
-    if (!groups[subject]) { groups[subject] = {}; dirty = true; }
-    if (!colors[subject]) { colors[subject] = {}; dirty = true; }
-
-    grades.forEach(grade => {
-      if (!groups[subject][grade]) { groups[subject][grade] = DEFAULT_GROUPS.slice(); dirty = true; }
-      if (!colors[subject][grade]) { colors[subject][grade] = {}; dirty = true; }
-
-      students.filter(s => s.grade === grade).forEach(s => {
-        const g = s[subject].group;
-        if (g && g !== 'Unassigned' && !groups[subject][grade].includes(g)) {
-          groups[subject][grade].push(g);
-          dirty = true;
-        }
-      });
-    });
-  });
-
-  if (dirty) { saveGroups_(groups); saveColors_(colors); }
 
   return { students, groups, colors };
 }
@@ -194,12 +228,14 @@ function addGroup(subject, grade, groupName) {
 
     const groups = loadGroups_();
     if (!groups[subject]) groups[subject] = {};
-    if (!groups[subject][cleanGrade]) groups[subject][cleanGrade] = DEFAULT_GROUPS.slice();
-    if (!groups[subject][cleanGrade].includes(cleanGroup)) {
-      groups[subject][cleanGrade].push(cleanGroup);
-      saveGroups_(groups);
+    const sheetGroups = sheetGroupsFor_(subject, cleanGrade);
+    const currentGroups = orderGroups_(sheetGroups, groups[subject][cleanGrade]);
+    if (currentGroups.indexOf(cleanGroup) === -1) {
+      currentGroups.push(cleanGroup);
     }
-    return { success: true, groups: groups[subject][cleanGrade] };
+    groups[subject][cleanGrade] = currentGroups;
+    saveGroups_(groups);
+    return { success: true, groups: currentGroups };
   } finally {
     lock.releaseLock();
   }
@@ -209,19 +245,26 @@ function renameGroup(subject, grade, oldName, newName) {
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
+    if (SUBJECTS.indexOf(subject) === -1) throw new Error('Unknown subject: ' + subject);
+    const cleanGrade = str_(grade) || 'Unassigned';
+    const cleanOldName = str_(oldName);
+    const cleanNewName = str_(newName);
+    if (!cleanOldName || !cleanNewName) throw new Error('Group names are required.');
+
     const groups = loadGroups_();
     const colors = loadColors_();
-    if (!groups[subject] || !groups[subject][grade]) return { success: false, error: 'Group set not found' };
+    if (!groups[subject]) groups[subject] = {};
 
-    const arr = groups[subject][grade];
-    const idx = arr.indexOf(oldName);
-    if (idx !== -1) arr[idx] = newName;
-    else if (!arr.includes(newName)) arr.push(newName);
+    const arr = orderGroups_(sheetGroupsFor_(subject, cleanGrade), groups[subject][cleanGrade]);
+    const idx = arr.indexOf(cleanOldName);
+    if (idx !== -1) arr[idx] = cleanNewName;
+    else if (arr.indexOf(cleanNewName) === -1) arr.push(cleanNewName);
+    groups[subject][cleanGrade] = arr;
     saveGroups_(groups);
 
-    if (colors[subject] && colors[subject][grade] && colors[subject][grade][oldName]) {
-      colors[subject][grade][newName] = colors[subject][grade][oldName];
-      delete colors[subject][grade][oldName];
+    if (colors[subject] && colors[subject][cleanGrade] && colors[subject][cleanGrade][cleanOldName]) {
+      colors[subject][cleanGrade][cleanNewName] = colors[subject][cleanGrade][cleanOldName];
+      delete colors[subject][cleanGrade][cleanOldName];
       saveColors_(colors);
     }
 
@@ -234,8 +277,8 @@ function renameGroup(subject, grade, oldName, newName) {
     for (let i = 1; i < values.length; i++) {
       const rowGrade = str_(values[i][gradeCol]) || 'Unassigned';
       const rowGroup = str_(values[i][groupCol]);
-      if (rowGrade === str_(grade) && rowGroup === str_(oldName)) {
-        sheet.getRange(i + 1, groupCol + 1).setValue(newName);
+      if (rowGrade === cleanGrade && rowGroup === cleanOldName) {
+        sheet.getRange(i + 1, groupCol + 1).setValue(cleanNewName);
       }
     }
     return { success: true };
@@ -278,11 +321,6 @@ function updateGroupOrder(subject, grade, orderedGroups) {
 
     const groups = loadGroups_();
     if (!groups[subject]) groups[subject] = {};
-    const existing = groups[subject][cleanGrade] || DEFAULT_GROUPS.slice();
-    existing.forEach(name => {
-      if (cleanOrder.indexOf(name) === -1) cleanOrder.push(name);
-    });
-
     groups[subject][cleanGrade] = cleanOrder;
     saveGroups_(groups);
     return { success: true, groups: cleanOrder };

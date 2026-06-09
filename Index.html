@@ -141,7 +141,6 @@
         const FLAG_STYLES = { SPED: 'bg-red-100 text-red-700', EL: 'bg-amber-100 text-amber-700', '504': 'bg-purple-100 text-purple-700' };
         const COLOR_KEYS = ['slate', 'red', 'yellow', 'green', 'blue'];
         const SWATCH = { slate: 'bg-slate-300 border-slate-400', red: 'bg-red-400 border-red-500', yellow: 'bg-yellow-400 border-yellow-500', green: 'bg-green-400 border-green-500', blue: 'bg-blue-400 border-blue-500' };
-        const DEFAULT_BOARD_COLUMNS = ['Unassigned', 'Tier 1', 'Tier 2', 'Tier 3'];
 
         window.onload = refreshData;
 
@@ -244,14 +243,14 @@
         function ensureBoardState() {
             if (!currentGrade) return;
             if (!groups[currentSubject]) groups[currentSubject] = {};
-            if (!groups[currentSubject][currentGrade]) groups[currentSubject][currentGrade] = DEFAULT_BOARD_COLUMNS.slice();
+            if (!groups[currentSubject][currentGrade]) groups[currentSubject][currentGrade] = [];
             if (!colors[currentSubject]) colors[currentSubject] = {};
             if (!colors[currentSubject][currentGrade]) colors[currentSubject][currentGrade] = {};
         }
 
         function boardColumns() {
             ensureBoardState();
-            return (groups[currentSubject] && groups[currentSubject][currentGrade]) || DEFAULT_BOARD_COLUMNS.slice();
+            return (groups[currentSubject] && groups[currentSubject][currentGrade]) || [];
         }
         function columnColors() {
             ensureBoardState();
