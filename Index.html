@@ -25,22 +25,18 @@
             .print-header { border-bottom: 1px solid #cbd5e1; margin-bottom: 12px; padding-bottom: 8px; }
             .print-title { font-size: 18px; font-weight: 700; margin: 0; }
             .print-subtitle { color: #64748b; font-size: 11px; margin: 3px 0 0; }
-            .print-board { align-items: start; display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
-            .print-column { border: 1px solid #cbd5e1; border-radius: 10px; break-inside: avoid; overflow: hidden; page-break-inside: avoid; }
-            .print-column-header { align-items: center; border-bottom: 1px solid #cbd5e1; display: flex; justify-content: space-between; padding: 6px 8px; }
+            .print-board { align-items: start; display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(125px, 1fr)); }
+            .print-column { border: 1px solid #cbd5e1; border-radius: 8px; }
+            .print-column-header { border-bottom: 1px solid #cbd5e1; padding: 5px 6px; }
+            .print-column-title-row { align-items: center; display: flex; justify-content: space-between; }
             .print-column-title { font-size: 10px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; }
             .print-count { background: white; border: 1px solid #cbd5e1; border-radius: 999px; font-size: 9px; font-weight: 800; padding: 1px 6px; }
-            .print-cards { display: grid; gap: 6px; padding: 7px; }
-            .print-empty { border: 1px dashed #cbd5e1; border-radius: 8px; color: #94a3b8; font-size: 10px; font-style: italic; padding: 12px; text-align: center; }
-            .print-card { background: white; border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px; position: relative; }
-            .print-card-id { color: #94a3b8; font-size: 8px; font-family: monospace; padding-right: 42px; }
-            .print-card-name { color: #1e293b; font-size: 11px; font-weight: 800; line-height: 1.25; padding-right: 42px; }
-            .print-card-team { color: #64748b; font-size: 9px; margin-top: 2px; }
-            .print-card-meta { align-items: center; color: #64748b; display: flex; font-size: 8px; justify-content: space-between; margin-top: 7px; }
-            .print-flags { display: flex; gap: 3px; margin-top: 5px; }
-            .print-flag { border-radius: 4px; font-size: 7px; font-weight: 800; padding: 1px 4px; }
-            .print-badges { display: flex; gap: 3px; position: absolute; right: 7px; top: 7px; }
-            .print-badge { align-items: center; border: 1px solid; border-radius: 999px; display: flex; font-size: 10px; font-weight: 900; height: 20px; justify-content: center; width: 20px; }
+            .print-header-details { color: #475569; display: grid; gap: 1px; font-size: 8px; margin-top: 4px; }
+            .print-detail { line-height: 1.2; overflow-wrap: anywhere; }
+            .print-student-list { background: white; list-style: none; margin: 0; padding: 4px 6px 6px; }
+            .print-student { border-bottom: 1px solid #e2e8f0; color: #1e293b; font-size: 9px; line-height: 1.15; padding: 2px 0; }
+            .print-student:last-child { border-bottom: 0; }
+            .print-empty { color: #94a3b8; font-size: 9px; font-style: italic; padding: 8px 6px; text-align: center; }
             * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
         }
     </style>
@@ -165,18 +161,6 @@
             yellow: { bg: '#fefce8', border: '#fde68a', header: '#fef3c7', text: '#a16207' },
             green:  { bg: '#f0fdf4', border: '#bbf7d0', header: '#dcfce7', text: '#15803d' },
             blue:   { bg: '#eff6ff', border: '#bfdbfe', header: '#dbeafe', text: '#1d4ed8' }
-        };
-        const PRINT_LEVEL_BADGES = {
-            slate:  { bg: '#f1f5f9', border: '#cbd5e1', text: '#475569' },
-            red:    { bg: '#fee2e2', border: '#fecaca', text: '#b91c1c' },
-            yellow: { bg: '#fef3c7', border: '#fde68a', text: '#a16207' },
-            green:  { bg: '#dcfce7', border: '#bbf7d0', text: '#15803d' },
-            blue:   { bg: '#dbeafe', border: '#bfdbfe', text: '#1d4ed8' }
-        };
-        const PRINT_FLAG_STYLES = {
-            SPED: 'background:#fee2e2;color:#b91c1c;',
-            EL: 'background:#fef3c7;color:#b45309;',
-            '504': 'background:#f3e8ff;color:#7e22ce;'
         };
         const LEVEL_BADGE_STYLES = {
             slate: 'bg-slate-100 border-slate-200 text-slate-500',
@@ -353,39 +337,25 @@
             return Object.keys(obj).map(key => `${key}:${obj[key]}`).join(';');
         }
 
-        function printLevelBadge(student, subject, label) {
-            const level = student[subject] && student[subject].level;
-            const color = PRINT_LEVEL_BADGES[levelColor(subject, level)] || PRINT_LEVEL_BADGES.slate;
-            const style = inlineStyle({ background: color.bg, 'border-color': color.border, color: color.text });
-            return `<span class="print-badge" style="${style}" title="${subject}: ${escapeAttr(level || 'No BOY level')}">${label}</span>`;
+        function columnHeaderDetails(group) {
+            const column = Array.from(document.querySelectorAll('#board .kanban-column'))
+                .find(el => el.dataset.group === group);
+            const card = column && column.closest('.column-card');
+            if (!card) return '';
+
+            return Array.from(card.querySelectorAll('input[data-print-label]'))
+                .map(input => ({
+                    label: input.dataset.printLabel,
+                    value: input.value.trim()
+                }))
+                .filter(item => item.value)
+                .map(item => `<div class="print-detail"><strong>${escapeHtml(item.label)}:</strong> ${escapeHtml(item.value)}</div>`)
+                .join('');
         }
 
-        function printFlags(student) {
-            return [
-                student.sped === 'Yes' ? `<span class="print-flag" style="${PRINT_FLAG_STYLES.SPED}">SPED</span>` : '',
-                student.el === 'Yes' ? `<span class="print-flag" style="${PRINT_FLAG_STYLES.EL}">EL</span>` : '',
-                student.five04 === 'Yes' ? `<span class="print-flag" style="${PRINT_FLAG_STYLES['504']}">504</span>` : ''
-            ].filter(Boolean).join('');
-        }
-
-        function renderPrintCard(student) {
-            const scale = student[currentSubject].scale;
-            const flags = printFlags(student);
-            return `
-                <div class="print-card">
-                    <div class="print-badges">
-                        ${printLevelBadge(student, 'ELA', 'E')}
-                        ${printLevelBadge(student, 'Math', 'M')}
-                    </div>
-                    <div class="print-card-id">ID: ${escapeHtml(student.id)}</div>
-                    <div class="print-card-name">${escapeHtml(student.name)}</div>
-                    <div class="print-card-team">${escapeHtml(student.team || 'No Team')}</div>
-                    ${flags ? `<div class="print-flags">${flags}</div>` : ''}
-                    <div class="print-card-meta">
-                        <span>${currentSubject} Scale: <strong>${escapeHtml(scale || '--')}</strong></span>
-                        <span>Abs: <strong>${student.absences}</strong></span>
-                    </div>
-                </div>`;
+        function renderPrintNames(list) {
+            if (list.length === 0) return '<div class="print-empty">Empty</div>';
+            return `<ol class="print-student-list">${list.map(student => `<li class="print-student">${escapeHtml(student.name)}</li>`).join('')}</ol>`;
         }
 
         function buildPrintView() {
@@ -403,17 +373,18 @@
                     .sort((a, b) => scaleOf(a) - scaleOf(b));
                 const columnStyle = inlineStyle({ background: theme.bg, 'border-color': theme.border });
                 const headerStyle = inlineStyle({ background: theme.header, 'border-color': theme.border, color: theme.text });
-                const cardsHtml = inColumn.length
-                    ? inColumn.map(renderPrintCard).join('')
-                    : '<div class="print-empty">Empty</div>';
+                const detailsHtml = columnHeaderDetails(group);
 
                 return `
                     <section class="print-column" style="${columnStyle}">
                         <div class="print-column-header" style="${headerStyle}">
-                            <div class="print-column-title">${escapeHtml(group)}</div>
-                            <div class="print-count">${inColumn.length}</div>
+                            <div class="print-column-title-row">
+                                <div class="print-column-title">${escapeHtml(group)}</div>
+                                <div class="print-count">${inColumn.length}</div>
+                            </div>
+                            ${detailsHtml ? `<div class="print-header-details">${detailsHtml}</div>` : ''}
                         </div>
-                        <div class="print-cards">${cardsHtml}</div>
+                        ${renderPrintNames(inColumn)}
                     </section>`;
             }).join('');
 
@@ -540,9 +511,9 @@
                             </div>
                         </div>
                         <div class="mt-1 grid grid-cols-3 gap-1">
-                            <input type="text" placeholder="Location" class="min-w-0 text-[9px] bg-white/50 border border-transparent hover:border-slate-300 focus:bg-white focus:border-blue-400 rounded px-1 py-0.5 outline-none transition-colors ${theme.text}" />
-                            <input type="text" placeholder="Skill" class="min-w-0 text-[9px] bg-white/50 border border-transparent hover:border-slate-300 focus:bg-white focus:border-blue-400 rounded px-1 py-0.5 outline-none transition-colors ${theme.text}" />
-                            <input type="text" placeholder="Curriculum" class="min-w-0 text-[9px] bg-white/50 border border-transparent hover:border-slate-300 focus:bg-white focus:border-blue-400 rounded px-1 py-0.5 outline-none transition-colors ${theme.text}" />
+                            <input type="text" data-print-label="Location" placeholder="Location" class="min-w-0 text-[9px] bg-white/50 border border-transparent hover:border-slate-300 focus:bg-white focus:border-blue-400 rounded px-1 py-0.5 outline-none transition-colors ${theme.text}" />
+                            <input type="text" data-print-label="Skill" placeholder="Skill" class="min-w-0 text-[9px] bg-white/50 border border-transparent hover:border-slate-300 focus:bg-white focus:border-blue-400 rounded px-1 py-0.5 outline-none transition-colors ${theme.text}" />
+                            <input type="text" data-print-label="Curriculum" placeholder="Curriculum" class="min-w-0 text-[9px] bg-white/50 border border-transparent hover:border-slate-300 focus:bg-white focus:border-blue-400 rounded px-1 py-0.5 outline-none transition-colors ${theme.text}" />
                         </div>
                     </div>
                     <div data-group="${groupAttr}" class="kanban-column p-3 space-y-3 flex-grow overflow-y-auto min-h-[100px]">
@@ -615,9 +586,6 @@
                     <div class="absolute top-3 right-3 flex gap-1 pointer-events-none">
                         ${levelBadge(s, 'ELA', 'E')}
                         ${levelBadge(s, 'Math', 'M')}
-                    </div>
-                    <div class="flex justify-between items-center mb-2 pr-16 pointer-events-none">
-                        <span class="text-[9px] font-mono text-slate-400">ID: ${escapeHtml(s.id)}</span>
                     </div>
                     <div class="font-bold text-slate-800 text-xs pr-16 pointer-events-none">${escapeHtml(s.name)}</div>
                     <div class="text-[10px] text-slate-400 mt-1 pointer-events-none">${escapeHtml(s.team || 'No Team')}</div>
