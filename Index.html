@@ -329,7 +329,13 @@
         function levelBadge(student, subject, label) {
             const level = student[subject] && student[subject].level;
             const color = levelColor(subject, level);
-            return `<span class="h-6 w-6 rounded-full border ${LEVEL_BADGE_STYLES[color]} flex items-center justify-center text-xs font-black shadow-sm" title="${subject}: ${escapeAttr(level || 'No BOY level')}">${label}</span>`;
+            return `<span class="h-6 w-6 rounded-full border ${LEVEL_BADGE_STYLES[color]} flex items-center justify-center text-xs font-black shadow-sm" title="${subject} BOY: ${escapeAttr(level || 'No BOY level')}">${label}</span>`;
+        }
+
+        function currentLevelBadge(student, subject, label) {
+            const level = student[subject] && student[subject].currentLevel;
+            const color = levelColor(subject, level);
+            return `<span class="h-6 w-6 rounded-full border ${LEVEL_BADGE_STYLES[color]} flex items-center justify-center text-xs font-black shadow-sm" title="${subject} Current: ${escapeAttr(level || 'No current level')}">${label}</span>`;
         }
 
         function printCurrentGrade() {
@@ -613,17 +619,18 @@
                     s.five04 === 'Yes' ? flag('504', '504') : ''
                 ].filter(Boolean).join('');
                 const scale = s[currentSubject].scale;
+                const scaleLabel = currentSubject === 'ELA' ? 'ORF' : 'Math Scale';
                 return `
                 <div data-id="${escapeAttr(s.id)}" onclick="openModalFromCard(this)" class="student-card relative bg-white p-4 rounded-xl shadow-sm border border-slate-200 cursor-grab hover:border-blue-400 hover:shadow-md transition-all">
                     <div class="absolute top-3 right-3 flex gap-1 pointer-events-none">
-                        ${levelBadge(s, 'ELA', 'E')}
-                        ${levelBadge(s, 'Math', 'M')}
+                        ${levelBadge(s, currentSubject, 'B')}
+                        ${currentLevelBadge(s, currentSubject, 'C')}
                     </div>
                     <div class="font-bold text-slate-800 text-xs pr-16 pointer-events-none">${escapeHtml(s.name)}</div>
                     <div class="text-[10px] text-slate-400 mt-1 pointer-events-none">${escapeHtml(s.team || 'No Team')}</div>
                     ${flags ? `<div class="flex space-x-1 mt-2 pointer-events-none">${flags}</div>` : ''}
                     <div class="mt-3 flex items-center justify-between pointer-events-none">
-                        <div class="text-[9px] bg-slate-50 px-2 py-1 rounded text-slate-500">${currentSubject} Scale: <span class="font-bold text-blue-600">${escapeHtml(scale || '--')}</span></div>
+                        <div class="text-[9px] bg-slate-50 px-2 py-1 rounded text-slate-500">${scaleLabel}: <span class="font-bold text-blue-600">${escapeHtml(scale || '--')}</span></div>
                         <div class="text-[9px] text-slate-400">Abs: <span class="${s.absences > 5 ? 'text-red-500 font-bold' : ''}">${s.absences}</span></div>
                     </div>
                 </div>`;
@@ -646,6 +653,7 @@
             const subjCard = (subject) => {
                 const d = s[subject];
                 const active = subject === currentSubject;
+                const scaleLabel = subject === 'ELA' ? 'ORF' : 'Scale';
                 return `
                 <div class="p-3 rounded-lg border col-span-2 ${active ? 'bg-blue-50 border-blue-200' : 'bg-slate-50 border-slate-100'}">
                     <div class="flex items-center justify-between mb-1">
@@ -653,8 +661,11 @@
                         <span class="text-sm font-semibold text-slate-800">${d.group}</span>
                     </div>
                     <div class="flex items-center justify-between text-xs text-slate-500">
-                        <span>Level: <span class="font-semibold text-slate-700">${d.level || 'N/A'}</span></span>
-                        <span>Scale: <span class="font-semibold text-blue-600">${d.scale || 'N/A'}</span></span>
+                        <span>BOY Level: <span class="font-semibold text-slate-700">${d.level || 'N/A'}</span></span>
+                        <span>Current Level: <span class="font-semibold text-slate-700">${d.currentLevel || 'N/A'}</span></span>
+                    </div>
+                    <div class="flex items-center justify-between text-xs text-slate-500 mt-1">
+                        <span>${scaleLabel}: <span class="font-semibold text-blue-600">${d.scale || 'N/A'}</span></span>
                     </div>
                 </div>`;
             };

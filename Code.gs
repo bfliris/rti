@@ -36,8 +36,8 @@ const COL = {
 const STUDENT_HEADERS = [
   COL.id, COL.name, COL.grade, COL.team, COL.sped, COL.el, COL.five04,
   COL.absences, COL.tardies,
-  'ELA Group', 'ELA BOY Level', 'ELA Scale Score',
-  'Math Group', 'MATH BOY Level', 'Math Scale Score',
+  'ELA Group', 'ELA BOY Level', 'Current ELA Level', 'Current ORF',
+  'Math Group', 'MATH BOY Level', 'Current Math Level', 'Math Scale Score',
   COL.updated
 ];
 
@@ -330,7 +330,8 @@ function sheetGroupsFor_(subject, grade) {
 /**
  * Returns { students, groups, colors }.
  *   students[i] = { id, name, grade, team, sped, el, five04, absences, tardies,
- *                   ELA: {group, level, scale}, Math: {group, level, scale} }
+ *                   ELA: {group, level, currentLevel, scale},
+ *                   Math: {group, level, currentLevel, scale} }
  *   groups[subject][grade] = [column names]
  *   colors[subject][grade] = { columnName: colorKey }
  */
@@ -348,7 +349,8 @@ function getData() {
   const subjectBlock = (row, subject) => ({
     group: str_(get(row, subject + ' Group')) || 'Unassigned',
     level: str_(get(row, boyLevelColumn_(subject))),
-    scale: get(row, subject + ' Scale Score')
+    currentLevel: str_(get(row, 'Current ' + subject + ' Level')),
+    scale: get(row, subject === 'ELA' ? 'Current ORF' : subject + ' Scale Score')
   });
 
   const students = values
@@ -572,9 +574,9 @@ function setupSheets() {
     s.setFrozenRows(1);
 
     const sample = [
-      ['1001', 'Kai A.',     '3', 'Room 12', 'No',  'Yes', 'No', 4, 2, 'Tier 2', 'One grade level below',       412, 'Tier 1', 'On grade',        455, ''],
-      ['1002', 'Leilani B.', '3', 'Room 12', 'Yes', 'No',  'No', 9, 1, 'Tier 3', 'Two or more grade levels below', 388, 'Tier 2', 'Below grade',    430, ''],
-      ['1003', 'Mateo C.',   '4', 'Room 21', 'No',  'No',  'No', 1, 0, 'Tier 1', 'On or Above grade level',     498, 'Tier 2', 'Above grade',    440, '']
+      ['1001', 'Kai A.',     '3', 'Room 12', 'No',  'Yes', 'No', 4, 2, 'Tier 2', 'One grade level below',       'On or Above grade level', 412, 'Tier 1', 'On grade',        'On grade',   455, ''],
+      ['1002', 'Leilani B.', '3', 'Room 12', 'Yes', 'No',  'No', 9, 1, 'Tier 3', 'Two or more grade levels below', 'One grade level below', 388, 'Tier 2', 'Below grade',    'On grade',   430, ''],
+      ['1003', 'Mateo C.',   '4', 'Room 21', 'No',  'No',  'No', 1, 0, 'Tier 1', 'On or Above grade level',     'On or Above grade level', 498, 'Tier 2', 'Above grade',    'Above grade', 440, '']
     ];
     s.getRange(2, 1, sample.length, sample[0].length).setValues(sample);
 
