@@ -38,6 +38,7 @@ const STUDENT_HEADERS = [
   COL.absences, COL.tardies,
   'ELA Group', 'ELA BOY Level', 'Current ELA Level', 'Current ORF',
   'Math Group', 'MATH BOY Level', 'Current Math Level', 'Math Scale Score',
+  'Current Need', 'Current %',
   COL.updated
 ];
 
@@ -365,6 +366,8 @@ function getData() {
       five04:   yn_(get(r, COL.five04)),
       absences: Number(get(r, COL.absences)) || 0,
       tardies:  Number(get(r, COL.tardies))  || 0,
+      currentNeed: str_(get(r, 'Current Need')),
+      currentPct:  str_(get(r, 'Current %')),
       ELA:      subjectBlock(r, 'ELA'),
       Math:     subjectBlock(r, 'Math')
     }));
