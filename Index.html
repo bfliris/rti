@@ -37,6 +37,7 @@
             .print-detail-value { overflow-wrap: anywhere; }
             .print-student-list { background: white; list-style: none; margin: 0; padding: 4px 6px 6px; }
             .print-student { border-bottom: 1px solid #e2e8f0; color: #1e293b; font-size: 9px; line-height: 1.15; padding: 2px 0; }
+            .print-student-team { color: #94a3b8; font-weight: 400; margin-left: 3px; }
             .print-student:last-child { border-bottom: 0; }
             .print-empty { color: #94a3b8; font-size: 9px; font-style: italic; padding: 8px 6px; text-align: center; }
             * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
@@ -367,7 +368,7 @@
 
         function renderPrintNames(list) {
             if (list.length === 0) return '<div class="print-empty">Empty</div>';
-            return `<ol class="print-student-list">${list.map(student => `<li class="print-student">${escapeHtml(student.name)}</li>`).join('')}</ol>`;
+            return `<ol class="print-student-list">${list.map(student => `<li class="print-student">${escapeHtml(student.name)}${student.team ? `<span class="print-student-team">— ${escapeHtml(student.team)}</span>` : ''}</li>`).join('')}</ol>`;
         }
 
         function buildPrintView() {
