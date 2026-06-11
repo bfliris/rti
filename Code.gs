@@ -70,6 +70,17 @@ function headerMap_(headerRow) {
 function str_(v) { return String(v == null ? '' : v).trim(); }
 function yn_(v)  { return str_(v).toLowerCase() === 'yes' ? 'Yes' : 'No'; }
 
+/** Sheet percentages arrive as decimals (0.85); display as whole-number percents (85). */
+function pct_(v) {
+  const raw = str_(v);
+  if (!raw) return '';
+  const cleaned = raw.replace(/%$/, '').trim();
+  const n = Number(cleaned);
+  if (isNaN(n)) return raw;
+  const asPct = Math.abs(n) <= 1 ? n * 100 : n;
+  return String(Math.round(asPct));
+}
+
 function boyLevelColumn_(subject) {
   return subject === 'Math' ? 'MATH BOY Level' : subject + ' BOY Level';
 }
@@ -367,7 +378,7 @@ function getData() {
       absences: Number(get(r, COL.absences)) || 0,
       tardies:  Number(get(r, COL.tardies))  || 0,
       currentNeed: str_(get(r, 'Current Need')),
-      currentPct:  str_(get(r, 'Current %')),
+      currentPct:  pct_(get(r, 'Current %')),
       ELA:      subjectBlock(r, 'ELA'),
       Math:     subjectBlock(r, 'Math')
     }));
