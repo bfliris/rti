@@ -44,6 +44,8 @@ const STUDENT_HEADERS = [
 
 const NOTES_HEADERS = ['Timestamp', 'Student ID', 'Student Name', 'Grade', 'Subject', 'Author', 'Note'];
 const GROUP_METADATA_HEADERS = ['Subject', 'Grade', 'Group', 'Color', 'Location', 'Skill', 'Curriculum', 'Sort Order'];
+const HISTORY_SHEETS  = { ELA: 'ELA History', Math: 'Math History' };
+const HISTORY_HEADERS = ['Student Name', 'Student ID', 'Timestamp', 'Group', 'Skill'];
 
 
 /* ───────────────────────────── Web app entry ───────────────────────────── */
@@ -405,6 +407,8 @@ function updateStudentGroup(studentId, subject, newGroup) {
   const col    = headerMap_(values[0]);
 
   const idCol      = col[COL.id];
+  const nameCol    = col[COL.name];
+  const gradeCol   = col[COL.grade];
   const groupCol   = col[subject + ' Group'];
   const updatedCol = col[COL.updated];
   if (idCol === undefined || groupCol === undefined) {
@@ -412,10 +416,21 @@ function updateStudentGroup(studentId, subject, newGroup) {
   }
 
   const target = str_(studentId);
+  const cleanGroup = newGroup === 'Unassigned' ? '' : str_(newGroup);
+
   for (let i = 1; i < values.length; i++) {
     if (str_(values[i][idCol]) === target) {
-      sheet.getRange(i + 1, groupCol + 1).setValue(newGroup === 'Unassigned' ? '' : newGroup);
+      const oldGroup = str_(values[i][groupCol]);
+      sheet.getRange(i + 1, groupCol + 1).setValue(cleanGroup);
       if (updatedCol !== undefined) sheet.getRange(i + 1, updatedCol + 1).setValue(new Date());
+
+      // Snapshot the new placement only when the group actually changed.
+      if (cleanGroup !== oldGroup) {
+        const studentName = nameCol !== undefined ? str_(values[i][nameCol]) : '';
+        const grade = gradeCol !== undefined ? (str_(values[i][gradeCol]) || 'Unassigned') : 'Unassigned';
+        const groupLabel = cleanGroup || 'Unassigned';
+        logPlacement_(subject, studentName, target, groupLabel, groupSkill_(subject, grade, groupLabel));
+      }
       return { success: true };
     }
   }
@@ -499,12 +514,28 @@ function setGroupMetadata(subject, grade, groupName, metadata) {
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
+    const cleanSubject = canonicalSubject_(subject);
+    if (!cleanSubject) throw new Error('Unknown subject: ' + subject);
+    const cleanGrade = str_(grade) || 'Unassigned';
+    const cleanGroup = str_(groupName) || 'Unassigned';
+
     const allowed = {};
     metadata = metadata || {};
     ['location', 'skill', 'curriculum'].forEach(field => {
       if (metadata[field] !== undefined) allowed[field] = metadata[field];
     });
-    upsertGroupMetadata_(subject, grade, groupName, allowed);
+
+    // Detect a real skill change so we can snapshot the students it affects.
+    const before = readGroupMetadata_();
+    const existing = before[cleanSubject] && before[cleanSubject][cleanGrade] && before[cleanSubject][cleanGrade][cleanGroup];
+    const oldSkill = existing ? str_(existing.skill) : '';
+    const skillChanged = allowed.skill !== undefined && str_(allowed.skill) !== oldSkill;
+
+    upsertGroupMetadata_(cleanSubject, cleanGrade, cleanGroup, allowed);
+
+    if (skillChanged) {
+      logGroupSkillChange_(cleanSubject, cleanGrade, cleanGroup, str_(allowed.skill));
+    }
     return { success: true };
   } finally {
     lock.releaseLock();
@@ -576,6 +607,115 @@ function addNote(studentId, studentName, grade, subject, note) {
 }
 
 
+/* ───────────────────────── Placement history ───────────────────────────── */
+
+function historySheet_(ss, subject) {
+  const canonical = canonicalSubject_(subject);
+  const name = HISTORY_SHEETS[canonical];
+  if (!name) throw new Error('Unknown subject: ' + subject);
+  let sheet = ss.getSheetByName(name);
+  if (!sheet) {
+    sheet = ss.insertSheet(name);
+    sheet.getRange(1, 1, 1, HISTORY_HEADERS.length).setValues([HISTORY_HEADERS]).setFontWeight('bold');
+    sheet.setFrozenRows(1);
+    sheet.setColumnWidth(HISTORY_HEADERS.indexOf('Skill') + 1, 320);
+  }
+  return sheet;
+}
+
+/** Current skill for a group, read from Group Metadata. */
+function groupSkill_(subject, grade, group) {
+  const canonical = canonicalSubject_(subject);
+  const metadata = readGroupMetadata_();
+  const meta = canonical && metadata[canonical] && metadata[canonical][grade] && metadata[canonical][grade][group];
+  return meta ? str_(meta.skill) : '';
+}
+
+/** Append one placement snapshot (used when a single student moves). */
+function logPlacement_(subject, studentName, studentId, group, skill) {
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const sheet = historySheet_(ss, subject);
+  sheet.appendRow([str_(studentName), str_(studentId), new Date(), str_(group), str_(skill)]);
+}
+
+/** Snapshot every student currently in a group (used when the group's skill changes). */
+function logGroupSkillChange_(subject, grade, group, skill) {
+  const sheet  = studentSheet_();
+  const values = sheet.getDataRange().getValues();
+  const col    = headerMap_(values[0]);
+  const idCol    = col[COL.id];
+  const nameCol  = col[COL.name];
+  const gradeCol = col[COL.grade];
+  const groupCol = col[subject + ' Group'];
+  if (idCol === undefined || groupCol === undefined) return;
+
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const hist = historySheet_(ss, subject);
+  const now = new Date();
+  const rows = [];
+  for (let i = 1; i < values.length; i++) {
+    const rowGrade = gradeCol !== undefined ? (str_(values[i][gradeCol]) || 'Unassigned') : 'Unassigned';
+    const rowGroup = str_(values[i][groupCol]) || 'Unassigned';
+    if (rowGrade === grade && rowGroup === group) {
+      rows.push([str_(values[i][nameCol]), str_(values[i][idCol]), now, group, skill]);
+    }
+  }
+  if (rows.length) {
+    hist.getRange(hist.getLastRow() + 1, 1, rows.length, HISTORY_HEADERS.length).setValues(rows);
+  }
+}
+
+/** Returns newest-first placement history for one student + subject. */
+function getPlacementHistory(studentId, subject) {
+  const canonical = canonicalSubject_(subject);
+  if (!canonical) return [];
+  const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(HISTORY_SHEETS[canonical]);
+  if (!sheet) return [];
+  const values = sheet.getDataRange().getValues();
+  if (values.length <= 1) return [];
+
+  const col    = headerMap_(values.shift());
+  const target = str_(studentId);
+  const tz     = Session.getScriptTimeZone();
+
+  return values
+    .filter(r => str_(r[col['Student ID']]) === target)
+    .map(r => ({
+      date:  r[col['Timestamp']] ? Utilities.formatDate(new Date(r[col['Timestamp']]), tz, 'MMM d, yyyy · h:mm a') : '',
+      group: str_(r[col['Group']]),
+      skill: str_(r[col['Skill']])
+    }))
+    .reverse();
+}
+
+/** OPTIONAL one-time baseline: snapshot every student's current placement. Run from the editor. */
+function seedPlacementHistory() {
+  const ss     = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const sheet  = studentSheet_();
+  const values = sheet.getDataRange().getValues();
+  const col    = headerMap_(values[0]);
+  const metadata = readGroupMetadata_();
+  const now = new Date();
+
+  SUBJECTS.forEach(subject => {
+    const hist = historySheet_(ss, subject);
+    const groupCol = col[subject + ' Group'];
+    const rows = [];
+    for (let i = 1; i < values.length; i++) {
+      const id   = str_(values[i][col[COL.id]]);
+      const name = str_(values[i][col[COL.name]]);
+      if (!id && !name) continue;
+      const grade = str_(values[i][col[COL.grade]]) || 'Unassigned';
+      const group = str_(values[i][groupCol]) || 'Unassigned';
+      const meta  = metadata[subject] && metadata[subject][grade] && metadata[subject][grade][group];
+      rows.push([name, id, now, group, meta ? str_(meta.skill) : '']);
+    }
+    if (rows.length) hist.getRange(hist.getLastRow() + 1, 1, rows.length, HISTORY_HEADERS.length).setValues(rows);
+  });
+  return 'Seeded placement history for ' + (values.length - 1) + ' students across ' + SUBJECTS.length + ' subjects.';
+}
+
+
 /* ───────────────────── One-time spreadsheet builder ────────────────────── */
 
 function setupSheets() {
@@ -607,10 +747,13 @@ function setupSheets() {
   // --- Notes ---
   if (!ss.getSheetByName(NOTES_SHEET)) createNotesSheet_(ss);
 
+  // --- Placement History (ELA + Math) ---
+  SUBJECTS.forEach(subject => historySheet_(ss, subject));
+
   // --- Group Metadata ---
   groupMetadataSheet_(ss).autoResizeColumns(1, GROUP_METADATA_HEADERS.length);
 
-  return 'Setup complete — Students, Notes, and Group Metadata sheets are ready.';
+  return 'Setup complete — Students, Notes, Group Metadata, and History sheets are ready.';
 }
 
 function createNotesSheet_(ss) {

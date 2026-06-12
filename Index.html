@@ -127,6 +127,14 @@
                 </div>
 
                 <div>
+                    <button type="button" onclick="toggleHistory()" class="w-full flex items-center justify-between mb-2">
+                        <h4 class="text-[11px] text-slate-500 uppercase font-bold tracking-widest" id="history-title">Placement History</h4>
+                        <svg id="history-chevron" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-slate-400 transition-transform duration-200" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
+                    </button>
+                    <div id="history-list" class="space-y-2 max-h-48 overflow-y-auto hidden"></div>
+                </div>
+
+                <div>
                     <div class="flex items-center justify-between mb-2">
                         <h4 class="text-[11px] text-slate-500 uppercase font-bold tracking-widest">Intervention Notes</h4>
                     </div>
@@ -148,6 +156,8 @@
         let activeStudentId = null;
         let columnSortable = null;
         let cardSortables = [];
+        let historyOpen = false;
+        let historyLoadedId = null;
 
         const COLUMN_THEMES = {
             slate:  { bg: 'bg-slate-200/40',  border: 'border-slate-200/60',  headerBg: 'bg-white/50',     text: 'text-slate-500' },
@@ -712,6 +722,14 @@
             document.getElementById('note-input').value = '';
             loadNotes(id);
 
+            historyOpen = false;
+            historyLoadedId = null;
+            document.getElementById('history-title').innerText = `${currentSubject} Placement History`;
+            document.getElementById('history-list').classList.add('hidden');
+            document.getElementById('history-list').innerHTML = '';
+            const histChevron = document.getElementById('history-chevron');
+            if (histChevron) histChevron.style.transform = '';
+
             const modal = document.getElementById('student-modal');
             const content = document.getElementById('student-modal-content');
             modal.classList.remove('hidden');
@@ -760,6 +778,41 @@
                 </div>`).join('');
         }
 
+        function toggleHistory() {
+            historyOpen = !historyOpen;
+            document.getElementById('history-list').classList.toggle('hidden', !historyOpen);
+            const chevron = document.getElementById('history-chevron');
+            if (chevron) chevron.style.transform = historyOpen ? 'rotate(180deg)' : '';
+            if (historyOpen && historyLoadedId !== activeStudentId) loadHistory(activeStudentId);
+        }
+
+        function loadHistory(id) {
+            const box = document.getElementById('history-list');
+            box.innerHTML = '<div class="text-xs text-slate-400 italic">Loading history…</div>';
+            if (!inAppsScript()) { box.innerHTML = '<div class="text-xs text-slate-400 italic">History appears in the deployed app.</div>'; return; }
+            historyLoadedId = id;
+            google.script.run
+                .withSuccessHandler(renderHistory)
+                .withFailureHandler(() => { historyLoadedId = null; box.innerHTML = '<div class="text-xs text-red-400">Could not load history.</div>'; })
+                .getPlacementHistory(id, currentSubject);
+        }
+
+        function renderHistory(rows) {
+            const box = document.getElementById('history-list');
+            if (!rows || rows.length === 0) {
+                box.innerHTML = '<div class="text-xs text-slate-400 italic">No placement history yet.</div>';
+                return;
+            }
+            box.innerHTML = rows.map(r => `
+                <div class="bg-slate-50 border border-slate-100 rounded-lg p-2.5">
+                    <div class="flex items-center justify-between mb-1">
+                        <span class="text-xs font-bold text-slate-700">${escapeHtml(r.group || '—')}</span>
+                        <span class="text-[9px] text-slate-400">${escapeHtml(r.date)}</span>
+                    </div>
+                    ${r.skill ? `<div class="text-[11px] text-slate-500">Skill: <span class="text-slate-700">${escapeHtml(r.skill)}</span></div>` : ''}
+                </div>`).join('');
+        }
+
         function submitNote() {
             const text = document.getElementById('note-input').value.trim();
             if (!text || !activeStudentId) return;
@@ -784,7 +837,13 @@
             if (!inAppsScript()) return;
             toast('Saving…', 'pending');
             google.script.run
-                .withSuccessHandler(() => toast('Saved', 'ok'))
+                .withSuccessHandler(() => {
+                    toast('Saved', 'ok');
+                    if (historyOpen && activeStudentId != null && String(activeStudentId) === String(id)) {
+                        historyLoadedId = null;
+                        loadHistory(activeStudentId);
+                    }
+                })
                 .withFailureHandler(() => { toast('Save failed — reloading', 'err'); refreshData(); })
                 .updateStudentGroup(id, currentSubject, group);
         }
