@@ -11,7 +11,7 @@
  *   - "Who has access":    Anyone within <your school domain>
  */
 
-const SPREADSHEET_ID = '1zM4-AcA2DacMMFq91xfYqS9lmf1oP03u4ETNlkprvKg';
+const SPREADSHEET_ID = '1jZb3FO-k8QAUNsLc6NX9aIcONghxtqUyfv872MX7-9c';
 const STUDENT_SHEET  = 'Students';
 const NOTES_SHEET    = 'Notes';
 const GROUP_METADATA_SHEET = 'Group Metadata';
