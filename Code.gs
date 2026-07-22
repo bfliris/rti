@@ -81,6 +81,17 @@ function pct_(v) {
   return String(Math.round(asPct));
 }
 
+/** Like pct_ but keeps two decimals (rounds to the hundredth place). */
+function pct2_(v) {
+  const raw = str_(v);
+  if (!raw) return '';
+  const cleaned = raw.replace(/%$/, '').trim();
+  const n = Number(cleaned);
+  if (isNaN(n)) return raw;
+  const asPct = Math.abs(n) <= 1 ? n * 100 : n;
+  return String(Math.round(asPct * 100) / 100);
+}
+
 function boyLevelColumn_(subject) {
   return subject === 'Math' ? 'MATH BOY Level' : subject + ' BOY Level';
 }
@@ -379,7 +390,7 @@ function getData() {
       tardies:  Number(get(r, COL.tardies))  || 0,
       currentNeed: str_(get(r, 'Current Need')),
       currentPct:  pct_(get(r, 'Current %')),
-      tier1Level:  str_(get(r, 'Tier 1 Level')),
+      tier1Level:  pct2_(get(r, 'Tier 1 Level')),
       ELA:      subjectBlock(r, 'ELA'),
       Math:     subjectBlock(r, 'Math')
     }));

@@ -661,7 +661,7 @@
                         <div class="text-[9px] text-slate-400">Abs: <span class="${s.absences > 5 ? 'text-red-500 font-bold' : ''}">${s.absences}</span></div>
                     </div>
                     ${currentSubject === 'Math' ? `<div class="mt-2 flex pointer-events-none">
-                        <div class="text-[9px] bg-slate-50 px-2 py-1 rounded text-slate-500">Tier 1 Level: <span class="font-bold text-blue-600">${escapeHtml(s.tier1Level || '--')}</span></div>
+                        <div class="text-[9px] bg-slate-50 px-2 py-1 rounded text-slate-500">Tier 1 Level: <span class="font-bold text-blue-600">${s.tier1Level ? escapeHtml(s.tier1Level) + '%' : '--'}</span></div>
                     </div>` : ''}
                 </div>`;
             }).join('');
