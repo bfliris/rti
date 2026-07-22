@@ -37,7 +37,7 @@ const STUDENT_HEADERS = [
   COL.id, COL.name, COL.grade, COL.team, COL.sped, COL.el, COL.five04,
   COL.absences, COL.tardies,
   'ELA Group', 'ELA BOY Level', 'Current ELA Level', 'Current ORF',
-  'Math Group', 'MATH BOY Level', 'Current Math Level', 'Math Scale Score',
+  'Math Group', 'MATH BOY Level', 'Current Math Level', 'Math Scale Score', 'Tier 1 Level',
   'Current Need', 'Current %',
   COL.updated
 ];
@@ -379,6 +379,7 @@ function getData() {
       tardies:  Number(get(r, COL.tardies))  || 0,
       currentNeed: str_(get(r, 'Current Need')),
       currentPct:  pct_(get(r, 'Current %')),
+      tier1Level:  str_(get(r, 'Tier 1 Level')),
       ELA:      subjectBlock(r, 'ELA'),
       Math:     subjectBlock(r, 'Math')
     }));
