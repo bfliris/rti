@@ -101,6 +101,11 @@
         </header>
 
         <main class="flex-1 overflow-x-auto overflow-y-auto p-6 bg-slate-50 relative w-full">
+            <div class="w-full flex justify-center mb-6">
+                <input id="board-bar" type="text" oninput="saveBoardBar()"
+                    placeholder="Add a title or note for this board…"
+                    class="w-full max-w-2xl text-center text-lg font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl px-4 py-2.5 shadow-sm placeholder:font-normal placeholder:text-slate-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-400 outline-none transition" />
+            </div>
             <div id="board" class="flex flex-row flex-nowrap space-x-6 items-start h-full pb-8 w-max min-w-full"></div>
         </main>
     </div>
@@ -509,6 +514,20 @@
             setGroupColor(button.dataset.group, color);
         }
 
+        function boardBarKey() {
+            return `rtiBoardBar:${currentSubject}:${currentGrade}`;
+        }
+
+        function loadBoardBar() {
+            const bar = document.getElementById('board-bar');
+            bar.value = currentGrade ? (localStorage.getItem(boardBarKey()) || '') : '';
+        }
+
+        function saveBoardBar() {
+            if (!currentGrade) return;
+            localStorage.setItem(boardBarKey(), document.getElementById('board-bar').value);
+        }
+
         function renderBoard() {
             const board = document.getElementById('board');
             resetSortables();
@@ -518,6 +537,7 @@
             const gradeStudents = students.filter(s => s.grade === currentGrade);
             document.getElementById('current-view-title').innerText = `Grade ${currentGrade} · ${currentSubject}`;
             document.getElementById('student-count').innerText = `${gradeStudents.length} students`;
+            loadBoardBar();
 
             const cols = boardColumns();
             const colColors = columnColors();
