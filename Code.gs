@@ -304,6 +304,29 @@ function renameGroupMetadata_(subject, grade, oldName, newName) {
   upsertGroupMetadata_(cleanSubject, cleanGrade, cleanNewName, {});
 }
 
+function deleteGroupMetadata_(subject, grade, groupName) {
+  const cleanSubject = canonicalSubject_(subject);
+  if (!cleanSubject) throw new Error('Unknown subject: ' + subject);
+  const cleanGrade = str_(grade) || 'Unassigned';
+  const cleanGroup = str_(groupName) || 'Unassigned';
+
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const sheet = groupMetadataSheet_(ss);
+  const values = sheet.getDataRange().getValues();
+  if (values.length <= 1) return;
+
+  const col = headerMap_(values[0]);
+  for (let i = values.length - 1; i >= 1; i--) {
+    if (
+      canonicalSubject_(values[i][col['Subject']]) === cleanSubject &&
+      (str_(values[i][col['Grade']]) || 'Unassigned') === cleanGrade &&
+      (str_(values[i][col['Group']]) || 'Unassigned') === cleanGroup
+    ) {
+      sheet.deleteRow(i + 1);
+    }
+  }
+}
+
 function sheetGroupsFromStudents_(students, metadata) {
   const groups = {};
 
@@ -506,6 +529,53 @@ function renameGroup(subject, grade, oldName, newName) {
       }
     }
     return { success: true };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function deleteGroup(subject, grade, groupName) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    if (SUBJECTS.indexOf(subject) === -1) throw new Error('Unknown subject: ' + subject);
+    const cleanGrade = str_(grade) || 'Unassigned';
+    const cleanGroup = str_(groupName);
+    if (!cleanGroup) throw new Error('Group name is required.');
+    if (cleanGroup === 'Unassigned') throw new Error('Cannot delete the Unassigned column.');
+
+    // Move every student in this column to Unassigned (blank cell) and snapshot
+    // the new placement so history stays accurate.
+    const sheet      = studentSheet_();
+    const values     = sheet.getDataRange().getValues();
+    const col        = headerMap_(values[0]);
+    const idCol      = col[COL.id];
+    const nameCol    = col[COL.name];
+    const gradeCol   = col[COL.grade];
+    const groupCol   = col[subject + ' Group'];
+    const updatedCol = col[COL.updated];
+    if (groupCol === undefined) throw new Error('Missing required column (' + subject + ' Group).');
+
+    const unassignedSkill = groupSkill_(subject, cleanGrade, 'Unassigned');
+    for (let i = 1; i < values.length; i++) {
+      const rowGrade = gradeCol !== undefined ? (str_(values[i][gradeCol]) || 'Unassigned') : 'Unassigned';
+      const rowGroup = str_(values[i][groupCol]);
+      if (rowGrade === cleanGrade && rowGroup === cleanGroup) {
+        sheet.getRange(i + 1, groupCol + 1).setValue('');
+        if (updatedCol !== undefined) sheet.getRange(i + 1, updatedCol + 1).setValue(new Date());
+        const studentName = nameCol !== undefined ? str_(values[i][nameCol]) : '';
+        const studentId = idCol !== undefined ? str_(values[i][idCol]) : '';
+        logPlacement_(subject, studentName, studentId, 'Unassigned', unassignedSkill);
+      }
+    }
+
+    // Drop the metadata row, then re-index the surviving columns.
+    deleteGroupMetadata_(subject, cleanGrade, cleanGroup);
+    const metadata = readGroupMetadata_();
+    const remaining = currentGroupsFor_(subject, cleanGrade, metadata).filter(g => g !== cleanGroup);
+    remaining.forEach((name, index) => upsertGroupMetadata_(subject, cleanGrade, name, { order: index + 1 }));
+
+    return { success: true, groups: remaining };
   } finally {
     lock.releaseLock();
   }
