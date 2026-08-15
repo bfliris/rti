@@ -125,6 +125,21 @@
 
     <div id="print-root"></div>
 
+    <div id="column-pane" class="hidden fixed inset-0 z-[90] bg-slate-900/50 backdrop-blur-sm p-4 sm:p-6 lg:p-10 opacity-0 transition-opacity duration-200">
+        <div id="column-pane-content" class="bg-slate-50 rounded-2xl shadow-2xl w-full h-full max-w-6xl mx-auto flex flex-col overflow-hidden transform scale-95 transition-transform duration-200">
+            <div class="shrink-0 px-6 py-4 border-b border-slate-200 bg-white flex items-center justify-between">
+                <div class="min-w-0">
+                    <h3 id="column-pane-title" class="text-lg font-bold text-slate-800 truncate">Column</h3>
+                    <p id="column-pane-sub" class="text-xs text-slate-500 mt-0.5">&nbsp;</p>
+                </div>
+                <button onclick="closeColumnPane()" class="ml-4 shrink-0 bg-slate-100 hover:bg-slate-200 p-2 rounded-lg transition text-slate-600" title="Close">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                </button>
+            </div>
+            <div id="column-pane-body" class="flex-1 overflow-y-auto p-6"></div>
+        </div>
+    </div>
+
     <div id="student-modal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex justify-center items-center p-4 opacity-0 transition-opacity duration-300">
         <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden flex flex-col transform transition-transform scale-95 duration-300" id="student-modal-content">
             <div class="bg-blue-600 p-4 flex justify-between items-center text-white">
@@ -553,6 +568,7 @@
 
         function deleteGroupPrompt(groupName) {
             if (!currentGrade || groupName === 'Unassigned') return;
+            if (paneGroup === groupName) closeColumnPane();
             const moved = students.filter(s => s.grade === currentGrade && s[currentSubject].group === groupName);
             const message = moved.length
                 ? `Delete "${groupName}"? Its ${moved.length} student(s) will move to Unassigned.`
@@ -630,7 +646,7 @@
                     <div class="px-2.5 py-1.5 flex flex-col border-b border-slate-200/50 rounded-t-2xl transition-colors hover:bg-white/60 ${theme.headerBg} column-drag-handle cursor-grab active:cursor-grabbing">
                         <div class="flex justify-between items-center gap-2 ${group !== 'Unassigned' ? 'pr-6' : ''}">
                             <h2 class="font-bold uppercase text-[10px] tracking-widest flex items-center gap-1.5 min-w-0 ${theme.text}">
-                                <span class="truncate">${escapedGroup}</span>
+                                <button type="button" data-group="${groupAttr}" onclick="event.stopPropagation(); openColumnPaneFromButton(this)" title="Expand column" class="truncate text-left hover:underline min-w-0">${escapedGroup}</button>
                                 ${group !== 'Unassigned' ? `<button type="button" data-group="${groupAttr}" onclick="event.stopPropagation(); renameGroupFromButton(this)" title="Rename" class="opacity-60 hover:opacity-100 transition-opacity shrink-0">
                                     <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" /></svg>
                                 </button>` : ''}
@@ -740,6 +756,49 @@
             }).join('');
         }
 
+        let paneGroup = null;
+
+        function openColumnPaneFromButton(button) {
+            openColumnPane(button.dataset.group);
+        }
+
+        function openColumnPane(group) {
+            if (!currentGrade) return;
+            paneGroup = group;
+            renderColumnPane();
+            const pane = document.getElementById('column-pane');
+            const content = document.getElementById('column-pane-content');
+            pane.classList.remove('hidden');
+            void pane.offsetWidth;
+            pane.classList.remove('opacity-0');
+            content.classList.remove('scale-95');
+        }
+
+        function renderColumnPane() {
+            if (paneGroup == null) return;
+            const inColumn = students
+                .filter(s => s.grade === currentGrade && s[currentSubject].group === paneGroup)
+                .sort((a, b) => scaleOf(a) - scaleOf(b));
+
+            document.getElementById('column-pane-title').innerText = paneGroup;
+            document.getElementById('column-pane-sub').innerText =
+                `Grade ${currentGrade} · ${currentSubject} · ${inColumn.length} student${inColumn.length === 1 ? '' : 's'}`;
+
+            const body = document.getElementById('column-pane-body');
+            body.innerHTML = inColumn.length
+                ? `<div class="grid gap-3" style="grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));">${renderCards(inColumn)}</div>`
+                : `<div class="text-center py-20 text-slate-400 text-sm italic">This column is empty.</div>`;
+        }
+
+        function closeColumnPane() {
+            const pane = document.getElementById('column-pane');
+            const content = document.getElementById('column-pane-content');
+            pane.classList.add('opacity-0');
+            content.classList.add('scale-95');
+            setTimeout(() => pane.classList.add('hidden'), 200);
+            paneGroup = null;
+        }
+
         function openModalFromCard(card) {
             openModal(card.dataset.id);
         }
@@ -837,6 +896,16 @@
             if (e.target === this) closeModal();
         });
 
+        document.getElementById('column-pane').addEventListener('click', function (e) {
+            if (e.target === this) closeColumnPane();
+        });
+
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape' && paneGroup != null && !document.getElementById('column-pane').classList.contains('hidden')) {
+                closeColumnPane();
+            }
+        });
+
         function loadNotes(id) {
             const box = document.getElementById('notes-list');
             box.innerHTML = '<div class="text-xs text-slate-400 italic">Loading notes…</div>';
@@ -920,6 +989,7 @@
             const s = students.find(x => x.id == id);
             if (s) s[currentSubject].group = group;
             renderBoard();
+            if (paneGroup != null) renderColumnPane();
             if (!inAppsScript()) return;
             toast('Saving…', 'pending');
             google.script.run
