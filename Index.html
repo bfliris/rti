@@ -481,79 +481,30 @@
                 alert('Select a grade before exporting.');
                 return;
             }
-
-            const cols = boardColumns();
-            const colColors = columnColors();
-            const gradeStudents = students.filter(s => s.grade === currentGrade);
-
-            // Precompute the roster for each column, sorted the same way the print view sorts.
-            const columnData = cols.map(group => ({
-                group,
-                theme: PRINT_THEMES[colColors[group] || 'slate'] || PRINT_THEMES.slate,
-                meta: columnMetadata(group),
-                students: gradeStudents
-                    .filter(s => s[currentSubject].group === group)
-                    .sort((a, b) => scaleOf(a) - scaleOf(b))
-            }));
-
-            const maxStudents = columnData.reduce((max, c) => Math.max(max, c.students.length), 0);
-
-            // Build a spreadsheet that mirrors the print board: each column group becomes a
-            // spreadsheet column, styled with the same theme colors used on screen and in print.
-            const headerCells = columnData.map(c => {
-                const style = `background-color:${c.theme.header};color:${c.theme.text};border:1px solid ${c.theme.border};` +
-                    'font-weight:bold;text-align:center;padding:4px;';
-                return `<td style="${style}">${escapeHtml(c.group)} (${c.students.length})</td>`;
-            }).join('');
-
-            const detailRow = (label, key) => columnData.map(c => {
-                const style = `background-color:${c.theme.bg};color:${c.theme.text};border:1px solid ${c.theme.border};` +
-                    'font-size:10px;padding:2px 4px;';
-                const value = c.meta[key];
-                return `<td style="${style}"><b>${escapeHtml(label)}:</b> ${value ? escapeHtml(value) : '—'}</td>`;
-            }).join('');
-
-            let bodyRows = '';
-            for (let i = 0; i < maxStudents; i++) {
-                bodyRows += '<tr>' + columnData.map(c => {
-                    const style = `background-color:${c.theme.bg};border:1px solid ${c.theme.border};padding:2px 4px;`;
-                    const student = c.students[i];
-                    if (!student) return `<td style="${style}"></td>`;
-                    const team = student.team ? ` (${escapeHtml(student.team)})` : '';
-                    return `<td style="${style}">${escapeHtml(student.name)}${team}</td>`;
-                }).join('') + '</tr>';
+            if (!inAppsScript()) {
+                alert('Open this through your Google Apps Script web-app URL to export.');
+                return;
             }
 
-            const colspan = Math.max(columnData.length, 1);
-            const title = `Grade ${escapeHtml(currentGrade)} - ${escapeHtml(currentSubject)} Groups`;
-            const subtitle = `${gradeStudents.length} students across ${cols.length} columns`;
+            const btn = document.querySelector('[onclick="exportCurrentGrade()"]');
+            if (btn) { btn.disabled = true; btn.classList.add('opacity-60', 'cursor-wait'); }
 
-            const table = `
-                <table border="1" cellspacing="0" cellpadding="2" style="font-family:Arial,sans-serif;font-size:11px;color:#1e293b;">
-                    <tr><td colspan="${colspan}" style="font-size:16px;font-weight:bold;border:none;padding:6px 4px;">${title}</td></tr>
-                    <tr><td colspan="${colspan}" style="font-size:11px;color:#64748b;border:none;padding:0 4px 8px;">${subtitle}</td></tr>
-                    <tr>${headerCells || '<td>No columns available for this grade.</td>'}</tr>
-                    <tr>${detailRow('Location', 'location')}</tr>
-                    <tr>${detailRow('Skill', 'skill')}</tr>
-                    <tr>${detailRow('Curriculum', 'curriculum')}</tr>
-                    ${bodyRows}
-                </table>`;
-
-            const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">` +
-                `<head><meta charset="utf-8"><!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet>` +
-                `<x:Name>Grade ${escapeHtml(currentGrade)} ${escapeHtml(currentSubject)}</x:Name>` +
-                `<x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions></x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]--></head>` +
-                `<body>${table}</body></html>`;
-
-            const blob = new Blob(['﻿', html], { type: 'application/vnd.ms-excel' });
-            const url = URL.createObjectURL(blob);
-            const link = document.createElement('a');
-            link.href = url;
-            link.download = `Grade_${currentGrade}_${currentSubject}_Groups.xls`;
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            setTimeout(() => URL.revokeObjectURL(url), 1000);
+            // Build a real Google Sheet on the server so cell colors, headers, and the
+            // Location/Skill/Curriculum details carry the same formatting as the print view.
+            google.script.run
+                .withSuccessHandler((result) => {
+                    if (btn) { btn.disabled = false; btn.classList.remove('opacity-60', 'cursor-wait'); }
+                    if (result && result.url) {
+                        window.open(result.url, '_blank');
+                    } else {
+                        alert('Export failed: no spreadsheet was created.');
+                    }
+                })
+                .withFailureHandler((err) => {
+                    if (btn) { btn.disabled = false; btn.classList.remove('opacity-60', 'cursor-wait'); }
+                    alert('Export failed: ' + (err && err.message ? err.message : err));
+                })
+                .exportBoardToSheet(currentSubject, currentGrade);
         }
 
         function addGroupPrompt() {

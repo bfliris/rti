@@ -798,6 +798,144 @@ function seedPlacementHistory() {
 }
 
 
+/* ─────────────────────── Export board to a Sheet ───────────────────────── */
+
+// Print/board theme colors, mirrored from the web UI's PRINT_THEMES so the
+// exported spreadsheet carries the same formatting cues as the printed board.
+const EXPORT_THEMES = {
+  slate:  { bg: '#f8fafc', border: '#cbd5e1', header: '#f1f5f9', text: '#475569' },
+  red:    { bg: '#fef2f2', border: '#fecaca', header: '#fee2e2', text: '#b91c1c' },
+  yellow: { bg: '#fefce8', border: '#fde68a', header: '#fef3c7', text: '#a16207' },
+  green:  { bg: '#f0fdf4', border: '#bbf7d0', header: '#dcfce7', text: '#15803d' },
+  blue:   { bg: '#eff6ff', border: '#bfdbfe', header: '#dbeafe', text: '#1d4ed8' }
+};
+
+function exportThemeFor_(colorKey) {
+  return EXPORT_THEMES[colorKey] || EXPORT_THEMES.slate;
+}
+
+function subjectScale_(student, subject) {
+  const block = student[subject] || {};
+  const n = Number(block.scale);
+  return isNaN(n) ? Number.POSITIVE_INFINITY : n;
+}
+
+/**
+ * Builds a new Google Sheet mirroring the current board for one grade + subject,
+ * applying the same theme colors used on screen and in the print view. Returns
+ * the new spreadsheet's URL so the client can open it in a new tab.
+ */
+function exportBoardToSheet(subject, grade) {
+  const canonical = canonicalSubject_(subject);
+  if (!canonical) throw new Error('Unknown subject: ' + subject);
+  const cleanGrade = str_(grade) || 'Unassigned';
+
+  const data = getData();
+  const metadata = readGroupMetadata_();
+  const groups = currentGroupsFor_(canonical, cleanGrade, metadata);
+  const colors = (data.colors[canonical] && data.colors[canonical][cleanGrade]) || {};
+  const columnMeta = (data.columnMeta[canonical] && data.columnMeta[canonical][cleanGrade]) || {};
+
+  const gradeStudents = data.students.filter(s => (str_(s.grade) || 'Unassigned') === cleanGrade);
+
+  // Roster per column, sorted by scale ascending (matching the board/print sort).
+  const columns = groups.map(group => ({
+    group: group,
+    theme: exportThemeFor_(colors[group]),
+    meta: columnMeta[group] || {},
+    students: gradeStudents
+      .filter(s => (s[canonical].group || 'Unassigned') === group)
+      .sort((a, b) => subjectScale_(a, canonical) - subjectScale_(b, canonical))
+  }));
+
+  const colCount = Math.max(columns.length, 1);
+  const maxStudents = columns.reduce((max, c) => Math.max(max, c.students.length), 0);
+
+  // Grid layout:
+  //   row 1: title            (merged)
+  //   row 2: subtitle         (merged)
+  //   row 3: group + count headers
+  //   rows 4-6: Location / Skill / Curriculum
+  //   rows 7+: student names
+  const HEADER_ROW = 3;
+  const DETAIL_ROWS = 3;          // Location, Skill, Curriculum
+  const FIRST_STUDENT_ROW = HEADER_ROW + 1 + DETAIL_ROWS;
+  const totalRows = FIRST_STUDENT_ROW - 1 + Math.max(maxStudents, 1);
+
+  const ss = SpreadsheetApp.create(
+    'Grade ' + cleanGrade + ' ' + canonical + ' Groups — ' +
+    Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd')
+  );
+  const sheet = ss.getSheets()[0];
+  sheet.setName('Grade ' + cleanGrade + ' ' + canonical);
+
+  // Title + subtitle.
+  sheet.getRange(1, 1).setValue('Grade ' + cleanGrade + ' - ' + canonical + ' Groups')
+    .setFontSize(16).setFontWeight('bold');
+  sheet.getRange(2, 1).setValue(gradeStudents.length + ' students across ' + columns.length + ' columns')
+    .setFontColor('#64748b');
+  if (colCount > 1) {
+    sheet.getRange(1, 1, 1, colCount).merge();
+    sheet.getRange(2, 1, 1, colCount).merge();
+  }
+
+  if (columns.length === 0) {
+    sheet.getRange(HEADER_ROW, 1).setValue('No columns available for this grade.');
+    return { success: true, url: ss.getUrl() };
+  }
+
+  columns.forEach((c, i) => {
+    const col = i + 1;
+    const detailLabels = [
+      ['Location', c.meta.location],
+      ['Skill', c.meta.skill],
+      ['Curriculum', c.meta.curriculum]
+    ];
+
+    // Header cell: "Group (count)".
+    const header = sheet.getRange(HEADER_ROW, col)
+      .setValue(c.group + ' (' + c.students.length + ')')
+      .setBackground(c.theme.header)
+      .setFontColor(c.theme.text)
+      .setFontWeight('bold')
+      .setHorizontalAlignment('center');
+
+    // Detail rows.
+    detailLabels.forEach(([label, value], d) => {
+      const rich = SpreadsheetApp.newRichTextValue()
+        .setText(label + ': ' + (value ? value : '—'))
+        .setTextStyle(0, label.length + 1,
+          SpreadsheetApp.newTextStyle().setBold(true).setForegroundColor(c.theme.text).build())
+        .build();
+      sheet.getRange(HEADER_ROW + 1 + d, col)
+        .setRichTextValue(rich)
+        .setBackground(c.theme.bg)
+        .setFontColor(c.theme.text)
+        .setFontSize(9);
+    });
+
+    // Student rows.
+    for (let r = 0; r < maxStudents; r++) {
+      const student = c.students[r];
+      const cell = sheet.getRange(FIRST_STUDENT_ROW + r, col).setBackground(c.theme.bg);
+      if (student) {
+        const name = student.name + (student.team ? ' (' + student.team + ')' : '');
+        cell.setValue(name);
+      }
+    }
+
+    // Column-wide border in the theme color.
+    sheet.getRange(HEADER_ROW, col, totalRows - HEADER_ROW + 1, 1)
+      .setBorder(true, true, true, true, false, false, c.theme.border, SpreadsheetApp.BorderStyle.SOLID);
+
+    sheet.setColumnWidth(col, 160);
+  });
+
+  sheet.setFrozenRows(HEADER_ROW);
+  return { success: true, url: ss.getUrl() };
+}
+
+
 /* ───────────────────── One-time spreadsheet builder ────────────────────── */
 
 function setupSheets() {
