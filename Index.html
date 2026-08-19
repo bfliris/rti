@@ -104,6 +104,10 @@
                     <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" /></svg>
                     Print
                 </button>
+                <button onclick="exportCurrentGrade()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-semibold transition flex items-center shadow-sm" title="Export Current Board as Spreadsheet">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3" /></svg>
+                    Export
+                </button>
                 <button onclick="addGroupPrompt()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-semibold transition flex items-center shadow-sm">
                     <span class="mr-1">+</span> New Column
                 </button>
@@ -470,6 +474,86 @@
                         ${columnsHtml || '<div class="print-empty">No columns available for this grade.</div>'}
                     </div>
                 </section>`;
+        }
+
+        function exportCurrentGrade() {
+            if (!currentGrade) {
+                alert('Select a grade before exporting.');
+                return;
+            }
+
+            const cols = boardColumns();
+            const colColors = columnColors();
+            const gradeStudents = students.filter(s => s.grade === currentGrade);
+
+            // Precompute the roster for each column, sorted the same way the print view sorts.
+            const columnData = cols.map(group => ({
+                group,
+                theme: PRINT_THEMES[colColors[group] || 'slate'] || PRINT_THEMES.slate,
+                meta: columnMetadata(group),
+                students: gradeStudents
+                    .filter(s => s[currentSubject].group === group)
+                    .sort((a, b) => scaleOf(a) - scaleOf(b))
+            }));
+
+            const maxStudents = columnData.reduce((max, c) => Math.max(max, c.students.length), 0);
+
+            // Build a spreadsheet that mirrors the print board: each column group becomes a
+            // spreadsheet column, styled with the same theme colors used on screen and in print.
+            const headerCells = columnData.map(c => {
+                const style = `background-color:${c.theme.header};color:${c.theme.text};border:1px solid ${c.theme.border};` +
+                    'font-weight:bold;text-align:center;padding:4px;';
+                return `<td style="${style}">${escapeHtml(c.group)} (${c.students.length})</td>`;
+            }).join('');
+
+            const detailRow = (label, key) => columnData.map(c => {
+                const style = `background-color:${c.theme.bg};color:${c.theme.text};border:1px solid ${c.theme.border};` +
+                    'font-size:10px;padding:2px 4px;';
+                const value = c.meta[key];
+                return `<td style="${style}"><b>${escapeHtml(label)}:</b> ${value ? escapeHtml(value) : '—'}</td>`;
+            }).join('');
+
+            let bodyRows = '';
+            for (let i = 0; i < maxStudents; i++) {
+                bodyRows += '<tr>' + columnData.map(c => {
+                    const style = `background-color:${c.theme.bg};border:1px solid ${c.theme.border};padding:2px 4px;`;
+                    const student = c.students[i];
+                    if (!student) return `<td style="${style}"></td>`;
+                    const team = student.team ? ` (${escapeHtml(student.team)})` : '';
+                    return `<td style="${style}">${escapeHtml(student.name)}${team}</td>`;
+                }).join('') + '</tr>';
+            }
+
+            const colspan = Math.max(columnData.length, 1);
+            const title = `Grade ${escapeHtml(currentGrade)} - ${escapeHtml(currentSubject)} Groups`;
+            const subtitle = `${gradeStudents.length} students across ${cols.length} columns`;
+
+            const table = `
+                <table border="1" cellspacing="0" cellpadding="2" style="font-family:Arial,sans-serif;font-size:11px;color:#1e293b;">
+                    <tr><td colspan="${colspan}" style="font-size:16px;font-weight:bold;border:none;padding:6px 4px;">${title}</td></tr>
+                    <tr><td colspan="${colspan}" style="font-size:11px;color:#64748b;border:none;padding:0 4px 8px;">${subtitle}</td></tr>
+                    <tr>${headerCells || '<td>No columns available for this grade.</td>'}</tr>
+                    <tr>${detailRow('Location', 'location')}</tr>
+                    <tr>${detailRow('Skill', 'skill')}</tr>
+                    <tr>${detailRow('Curriculum', 'curriculum')}</tr>
+                    ${bodyRows}
+                </table>`;
+
+            const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">` +
+                `<head><meta charset="utf-8"><!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet>` +
+                `<x:Name>Grade ${escapeHtml(currentGrade)} ${escapeHtml(currentSubject)}</x:Name>` +
+                `<x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions></x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]--></head>` +
+                `<body>${table}</body></html>`;
+
+            const blob = new Blob(['﻿', html], { type: 'application/vnd.ms-excel' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `Grade_${currentGrade}_${currentSubject}_Groups.xls`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
         }
 
         function addGroupPrompt() {
