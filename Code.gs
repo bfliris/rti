@@ -820,23 +820,20 @@ function subjectScale_(student, subject) {
   return isNaN(n) ? Number.POSITIVE_INFINITY : n;
 }
 
+const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
 /** Exports a temporary formatted spreadsheet as .xlsx bytes and trashes it. */
 function xlsxFromSpreadsheet_(ss, filename) {
   const id = ss.getId();
   try {
     SpreadsheetApp.flush();
-    const url = 'https://docs.google.com/spreadsheets/d/' + id + '/export?format=xlsx';
-    const response = UrlFetchApp.fetch(url, {
-      headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },
-      muteHttpExceptions: true
-    });
-    if (response.getResponseCode() !== 200) {
-      throw new Error('Export request failed (HTTP ' + response.getResponseCode() + ').');
-    }
+    // Advanced Drive Service (v3). Needs only Drive scopes — no external_request.
+    const exported = Drive.Files.export(id, XLSX_MIME);
+    const blob = (exported && exported.getBytes) ? exported : exported.getBlob();
     return {
       success: true,
       filename: filename,
-      bytes: Utilities.base64Encode(response.getBlob().getBytes())
+      bytes: Utilities.base64Encode(blob.getBytes())
     };
   } finally {
     // Remove the temporary Drive file so nothing lingers under anyone's account.
