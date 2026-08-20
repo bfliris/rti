@@ -1,7 +1,5 @@
 {
-  "timeZone": "America/New_York",
-  "exceptionLogging": "STACKDRIVER",
-  "runtimeVersion": "V8",
+  "timeZone": "Pacific/Honolulu",
   "dependencies": {
     "enabledAdvancedServices": [
       {
@@ -11,13 +9,15 @@
       }
     ]
   },
+  "webapp": {
+    "executeAs": "USER_DEPLOYING",
+    "access": "DOMAIN"
+  },
   "oauthScopes": [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive",
     "https://www.googleapis.com/auth/userinfo.email"
   ],
-  "webapp": {
-    "executeAs": "USER_ACCESSING",
-    "access": "DOMAIN"
-  }
+  "exceptionLogging": "STACKDRIVER",
+  "runtimeVersion": "V8"
 }
