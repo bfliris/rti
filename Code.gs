@@ -820,12 +820,37 @@ function subjectScale_(student, subject) {
   return isNaN(n) ? Number.POSITIVE_INFINITY : n;
 }
 
+/** Exports a temporary formatted spreadsheet as .xlsx bytes and trashes it. */
+function xlsxFromSpreadsheet_(ss, filename) {
+  const id = ss.getId();
+  try {
+    SpreadsheetApp.flush();
+    const url = 'https://docs.google.com/spreadsheets/d/' + id + '/export?format=xlsx';
+    const response = UrlFetchApp.fetch(url, {
+      headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },
+      muteHttpExceptions: true
+    });
+    if (response.getResponseCode() !== 200) {
+      throw new Error('Export request failed (HTTP ' + response.getResponseCode() + ').');
+    }
+    return {
+      success: true,
+      filename: filename,
+      bytes: Utilities.base64Encode(response.getBlob().getBytes())
+    };
+  } finally {
+    // Remove the temporary Drive file so nothing lingers under anyone's account.
+    try { DriveApp.getFileById(id).setTrashed(true); } catch (e) { /* best effort */ }
+  }
+}
+
 /**
- * Builds a new Google Sheet mirroring the current board for one grade + subject,
- * applying the same theme colors used on screen and in the print view. Returns
- * the new spreadsheet's URL so the client can open it in a new tab.
+ * Builds a spreadsheet mirroring the current board for one grade + subject,
+ * applying the same theme colors used on screen and in the print view, and
+ * returns it as downloadable .xlsx bytes. The underlying Google Sheet is
+ * temporary and is trashed before returning, so no owned file is left behind.
  */
-function exportBoardToSheet(subject, grade) {
+function exportBoardToXlsx(subject, grade) {
   const canonical = canonicalSubject_(subject);
   if (!canonical) throw new Error('Unknown subject: ' + subject);
   const cleanGrade = str_(grade) || 'Unassigned';
@@ -862,10 +887,9 @@ function exportBoardToSheet(subject, grade) {
   const FIRST_STUDENT_ROW = HEADER_ROW + 1 + DETAIL_ROWS;
   const totalRows = FIRST_STUDENT_ROW - 1 + Math.max(maxStudents, 1);
 
-  const ss = SpreadsheetApp.create(
-    'Grade ' + cleanGrade + ' ' + canonical + ' Groups — ' +
-    Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd')
-  );
+  const dateStamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  const filename = 'Grade_' + cleanGrade + '_' + canonical + '_Groups_' + dateStamp + '.xlsx';
+  const ss = SpreadsheetApp.create('Grade ' + cleanGrade + ' ' + canonical + ' Groups — ' + dateStamp);
   const sheet = ss.getSheets()[0];
   sheet.setName('Grade ' + cleanGrade + ' ' + canonical);
 
@@ -881,7 +905,7 @@ function exportBoardToSheet(subject, grade) {
 
   if (columns.length === 0) {
     sheet.getRange(HEADER_ROW, 1).setValue('No columns available for this grade.');
-    return { success: true, url: ss.getUrl() };
+    return xlsxFromSpreadsheet_(ss, filename);
   }
 
   columns.forEach((c, i) => {
@@ -932,7 +956,7 @@ function exportBoardToSheet(subject, grade) {
   });
 
   sheet.setFrozenRows(HEADER_ROW);
-  return { success: true, url: ss.getUrl() };
+  return xlsxFromSpreadsheet_(ss, filename);
 }
 
 

@@ -489,13 +489,15 @@
             const btn = document.querySelector('[onclick="exportCurrentGrade()"]');
             if (btn) { btn.disabled = true; btn.classList.add('opacity-60', 'cursor-wait'); }
 
-            // Build a real Google Sheet on the server so cell colors, headers, and the
-            // Location/Skill/Curriculum details carry the same formatting as the print view.
+            // The server builds a formatted spreadsheet and returns it as .xlsx bytes so
+            // cell colors, headers, and the Location/Skill/Curriculum details match the
+            // print view. Delivered as a download — no Google Sheet is left in anyone's Drive.
             google.script.run
                 .withSuccessHandler((result) => {
                     if (btn) { btn.disabled = false; btn.classList.remove('opacity-60', 'cursor-wait'); }
-                    if (result && result.url) {
-                        window.open(result.url, '_blank');
+                    if (result && result.bytes) {
+                        downloadBase64(result.bytes, result.filename || 'board.xlsx',
+                            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
                     } else {
                         alert('Export failed: no spreadsheet was created.');
                     }
@@ -504,7 +506,21 @@
                     if (btn) { btn.disabled = false; btn.classList.remove('opacity-60', 'cursor-wait'); }
                     alert('Export failed: ' + (err && err.message ? err.message : err));
                 })
-                .exportBoardToSheet(currentSubject, currentGrade);
+                .exportBoardToXlsx(currentSubject, currentGrade);
+        }
+
+        function downloadBase64(base64, filename, mimeType) {
+            const binary = atob(base64);
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+            const url = URL.createObjectURL(new Blob([bytes], { type: mimeType }));
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
         }
 
         function addGroupPrompt() {
