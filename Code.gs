@@ -15,7 +15,15 @@ const SPREADSHEET_ID = '12_fGmhgAjgjVOoKbWhk27gtRjuY2olmte1W3RUqZNto';
 const STUDENT_SHEET  = 'Students';
 const NOTES_SHEET    = 'Notes';
 const GROUP_METADATA_SHEET = 'Group Metadata';
+const USERS_SHEET    = 'Users';
 const SUBJECTS       = ['ELA', 'Math'];
+
+// The "Users" tab controls who can view which grade levels. A row whose
+// Grade Level is "Master" (any case) grants access to every grade; any other
+// value grants access to just that one grade. Admins manage credentials by
+// editing this tab directly — no code changes required.
+const USERS_HEADERS = ['Grade Level', 'Username', 'Password'];
+const MASTER_GRADE  = 'Master';
 
 // Expected header names in the Students sheet. Group and scale columns are
 // derived as `${subject} Group` and `${subject} Scale Score`. BOY level columns
@@ -373,17 +381,82 @@ function sheetGroupsFor_(subject, grade) {
 }
 
 
+/* ──────────────────────────── Authentication ───────────────────────────── */
+
+function usersSheet_(ss) {
+  const sheet = ss.getSheetByName(USERS_SHEET) || ss.insertSheet(USERS_SHEET);
+  ensureSheetHeaders_(sheet, USERS_HEADERS);
+  return sheet;
+}
+
+/**
+ * Resolves which grades a username/password may view by reading the Users tab.
+ * Returns { isMaster, grades: [gradeLevel, ...] } on success, or null when the
+ * credentials don't match any row. A "Master" row grants access to all grades.
+ */
+function authorizedGrades_(username, password) {
+  const user = str_(username);
+  const pass = str_(password);
+  if (!user || !pass) return null;
+
+  const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(USERS_SHEET);
+  if (!sheet) return null;
+  const values = sheet.getDataRange().getValues();
+  if (values.length <= 1) return null;
+
+  const col = headerMap_(values[0]);
+  const gCol = col['Grade Level'], uCol = col['Username'], pCol = col['Password'];
+  if (gCol === undefined || uCol === undefined || pCol === undefined) return null;
+
+  let isMaster = false;
+  let matched = false;
+  const grades = [];
+  for (let i = 1; i < values.length; i++) {
+    if (str_(values[i][uCol]) === user && str_(values[i][pCol]) === pass) {
+      matched = true;
+      const level = str_(values[i][gCol]);
+      if (level.toLowerCase() === MASTER_GRADE.toLowerCase()) isMaster = true;
+      else if (level) pushUnique_(grades, level);
+    }
+  }
+  if (!matched) return null;
+  return { isMaster: isMaster, grades: grades };
+}
+
+/**
+ * Client-facing login check. Returns { success, isMaster, grades } so the UI can
+ * show the login screen, then reveal only the grade levels this user may view.
+ * Never returns the stored password back to the client.
+ */
+function authenticate(username, password) {
+  if (!str_(username) || !str_(password)) {
+    return { success: false, error: 'Enter a username and password.' };
+  }
+  const auth = authorizedGrades_(username, password);
+  if (!auth) return { success: false, error: 'Incorrect username or password.' };
+  if (!auth.isMaster && auth.grades.length === 0) {
+    return { success: false, error: 'This account has no grade levels assigned.' };
+  }
+  return { success: true, isMaster: auth.isMaster, grades: auth.grades };
+}
+
+
 /* ─────────────────────────────── Read data ─────────────────────────────── */
 
 /**
- * Returns { students, groups, colors }.
+ * Returns { students, groups, colors } for the grade levels the caller may view.
+ * Credentials are re-checked here so student data is never returned for grades
+ * the user isn't authorized to see, even if the client is bypassed.
  *   students[i] = { id, name, grade, team, sped, el, five04, absences, tardies,
  *                   ELA: {group, level, currentLevel, scale},
  *                   Math: {group, level, currentLevel, scale} }
  *   groups[subject][grade] = [column names]
  *   colors[subject][grade] = { columnName: colorKey }
  */
-function getData() {
+function getData(username, password) {
+  const auth = authorizedGrades_(username, password);
+  if (!auth) throw new Error('Not authorized. Please sign in again.');
+
   const sheet  = studentSheet_();
   const values = sheet.getDataRange().getValues();
 
@@ -401,8 +474,11 @@ function getData() {
     scale: get(row, subject === 'ELA' ? 'Current ORF' : subject + ' Scale Score')
   });
 
+  const gradeAllowed = (grade) => auth.isMaster || auth.grades.indexOf(str_(grade) || 'Unassigned') !== -1;
+
   const students = values
     .filter(r => str_(get(r, COL.id)) || str_(get(r, COL.name)))
+    .filter(r => gradeAllowed(str_(get(r, COL.grade)) || 'Unassigned'))
     .map(r => ({
       id:       str_(get(r, COL.id))    || 'N/A',
       name:     str_(get(r, COL.name))  || 'Unknown',
@@ -835,7 +911,19 @@ function setupSheets() {
   // --- Group Metadata ---
   groupMetadataSheet_(ss).autoResizeColumns(1, GROUP_METADATA_HEADERS.length);
 
-  return 'Setup complete — Students, Notes, Group Metadata, and History sheets are ready.';
+  // --- Users (grade-level login credentials) ---
+  const users = usersSheet_(ss);
+  if (users.getLastRow() <= 1) {
+    const seed = [
+      ['KG', '', ''], ['1', '', ''], ['2', '', ''], ['3', '', ''],
+      ['4', '', ''], ['5', '', ''], ['6', '', ''],
+      ['Master', '', ''], ['Master', '', ''], ['Master', '', ''], ['Master', '', '']
+    ];
+    users.getRange(2, 1, seed.length, USERS_HEADERS.length).setValues(seed);
+  }
+  users.autoResizeColumns(1, USERS_HEADERS.length);
+
+  return 'Setup complete — Students, Notes, Group Metadata, History, and Users sheets are ready.';
 }
 
 function createNotesSheet_(ss) {

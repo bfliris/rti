@@ -59,6 +59,32 @@
 
     <div id="toast" class="fixed bottom-6 right-6 z-[200] px-4 py-2.5 rounded-xl shadow-lg text-sm font-semibold text-white opacity-0 translate-y-2 pointer-events-none">Saved</div>
 
+    <div id="login-overlay" class="hidden fixed inset-0 z-[300] bg-slate-900 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
+            <div class="bg-blue-600 px-6 py-5 text-white">
+                <h2 class="text-xl font-bold">RTI / MTSS</h2>
+                <p class="text-blue-200 text-sm mt-1">Sign in to view grade levels</p>
+            </div>
+            <form id="login-form" onsubmit="submitLogin(event)" class="p-6 space-y-4">
+                <div>
+                    <label class="block text-[11px] text-slate-500 uppercase font-bold tracking-wider mb-1.5">Username</label>
+                    <input id="login-username" type="text" autocomplete="username" autofocus
+                        class="w-full text-sm border border-slate-200 rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-400 outline-none" />
+                </div>
+                <div>
+                    <label class="block text-[11px] text-slate-500 uppercase font-bold tracking-wider mb-1.5">Password</label>
+                    <input id="login-password" type="password" autocomplete="current-password"
+                        class="w-full text-sm border border-slate-200 rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-400 outline-none" />
+                </div>
+                <p id="login-error" class="hidden text-sm text-red-600 font-medium"></p>
+                <button id="login-submit" type="submit"
+                    class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2.5 rounded-lg transition shadow-sm disabled:opacity-60">
+                    Sign In
+                </button>
+            </form>
+        </div>
+    </div>
+
     <button id="sidebar-expand" onclick="toggleSidebarMinimize()" class="fixed top-4 left-4 z-50 bg-slate-900 hover:bg-slate-800 text-white p-2 rounded-lg shadow-lg items-center justify-center" title="Expand sidebar">
         <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16m-7 6h7" /></svg>
     </button>
@@ -79,8 +105,17 @@
         <nav id="grade-nav" class="flex-grow p-4 space-y-2 overflow-y-auto">
             <div class="text-slate-500 text-sm animate-pulse">Scanning for grades...</div>
         </nav>
-        <div class="p-4 border-t border-slate-800 text-[10px] text-slate-500 uppercase tracking-widest font-semibold text-center">
-            RTI System v3.0
+        <div class="p-4 border-t border-slate-800 space-y-3">
+            <div class="flex items-center justify-between">
+                <span id="session-user" class="text-xs text-slate-400 truncate"></span>
+                <button onclick="logout()" class="text-xs text-slate-400 hover:text-white font-semibold flex items-center gap-1" title="Sign out">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
+                    Sign out
+                </button>
+            </div>
+            <div class="text-[10px] text-slate-500 uppercase tracking-widest font-semibold text-center">
+                RTI System v3.0
+            </div>
         </div>
     </aside>
 
@@ -191,6 +226,7 @@
         let cardSortables = [];
         let historyOpen = false;
         let historyLoadedId = null;
+        let session = null; // { username, password, isMaster, grades }
 
         const COLUMN_THEMES = {
             slate:  { bg: 'bg-slate-200/40',  border: 'border-slate-200/60',  headerBg: 'bg-white/50',     text: 'text-slate-500' },
@@ -217,7 +253,88 @@
             blue: 'bg-blue-100 border-blue-200 text-blue-700'
         };
 
-        window.onload = () => { applySidebarMinimized(); refreshData(); };
+        window.onload = () => { applySidebarMinimized(); restoreSession(); };
+
+        /* ───────────────────────────── Auth ───────────────────────────── */
+
+        function restoreSession() {
+            let saved = null;
+            try { saved = JSON.parse(sessionStorage.getItem('rtiSession') || 'null'); } catch (e) { saved = null; }
+            if (saved && saved.username && saved.password) {
+                session = saved;
+                showLogin(false);
+                refreshData();
+            } else {
+                showLogin(true);
+            }
+        }
+
+        function showLogin(show) {
+            document.getElementById('login-overlay').classList.toggle('hidden', !show);
+            if (show) {
+                document.getElementById('login-error').classList.add('hidden');
+                const u = document.getElementById('login-username');
+                if (u) setTimeout(() => u.focus(), 50);
+            }
+        }
+
+        function submitLogin(event) {
+            event.preventDefault();
+            const username = document.getElementById('login-username').value.trim();
+            const password = document.getElementById('login-password').value;
+            const errEl = document.getElementById('login-error');
+            const btn = document.getElementById('login-submit');
+            errEl.classList.add('hidden');
+
+            if (!username || !password) {
+                errEl.textContent = 'Enter a username and password.';
+                errEl.classList.remove('hidden');
+                return;
+            }
+            if (!inAppsScript()) {
+                errEl.textContent = 'Open this through your Google Apps Script web-app URL.';
+                errEl.classList.remove('hidden');
+                return;
+            }
+
+            btn.disabled = true;
+            btn.textContent = 'Signing in…';
+            google.script.run
+                .withSuccessHandler((res) => {
+                    btn.disabled = false;
+                    btn.textContent = 'Sign In';
+                    if (!res || !res.success) {
+                        errEl.textContent = (res && res.error) || 'Sign in failed.';
+                        errEl.classList.remove('hidden');
+                        return;
+                    }
+                    session = { username, password, isMaster: !!res.isMaster, grades: res.grades || [] };
+                    try { sessionStorage.setItem('rtiSession', JSON.stringify(session)); } catch (e) {}
+                    document.getElementById('login-password').value = '';
+                    showLogin(false);
+                    refreshData();
+                })
+                .withFailureHandler((err) => {
+                    btn.disabled = false;
+                    btn.textContent = 'Sign In';
+                    errEl.textContent = 'Error: ' + err.message;
+                    errEl.classList.remove('hidden');
+                })
+                .authenticate(username, password);
+        }
+
+        function logout() {
+            session = null;
+            try { sessionStorage.removeItem('rtiSession'); } catch (e) {}
+            students = []; groups = {}; colors = {}; columnMeta = {};
+            currentGrade = null;
+            document.getElementById('board').innerHTML = '';
+            document.getElementById('grade-nav').innerHTML = '';
+            document.getElementById('session-user').textContent = '';
+            document.getElementById('login-username').value = '';
+            document.getElementById('login-password').value = '';
+            showLogin(true);
+        }
         window.addEventListener('beforeprint', () => { if (currentGrade) buildPrintView(); });
         window.addEventListener('afterprint', clearPrintView);
 
@@ -260,12 +377,15 @@
         function inAppsScript() { return typeof google !== 'undefined' && google.script && google.script.run; }
 
         function refreshData() {
+            if (!session) { showLogin(true); return; }
             showLoading(true);
             if (!inAppsScript()) {
                 showLoading(false);
                 alert('Open this through your Google Apps Script web-app URL.');
                 return;
             }
+            const label = document.getElementById('session-user');
+            if (label) label.textContent = session.username + (session.isMaster ? ' · Master' : '');
             google.script.run
                 .withSuccessHandler((data) => {
                     students = data.students || [];
@@ -274,7 +394,8 @@
                     columnMeta = data.columnMeta || {};
 
                     if (students.length === 0) {
-                        document.getElementById('grade-nav').innerHTML = '<div class="text-slate-500 p-2 text-sm text-center">No data in sheet. Run setupSheets() once, then add students.</div>';
+                        document.getElementById('grade-nav').innerHTML = '<div class="text-slate-500 p-2 text-sm text-center">No students available for this account yet.</div>';
+                        document.getElementById('board').innerHTML = '';
                         showLoading(false);
                         return;
                     }
@@ -287,8 +408,15 @@
                     renderBoard();
                     showLoading(false);
                 })
-                .withFailureHandler((err) => { showLoading(false); alert('Error: ' + err.message); })
-                .getData();
+                .withFailureHandler((err) => {
+                    showLoading(false);
+                    // A rejected getData almost always means the session is no longer valid.
+                    logout();
+                    const errEl = document.getElementById('login-error');
+                    errEl.textContent = 'Your session expired. Please sign in again.';
+                    errEl.classList.remove('hidden');
+                })
+                .getData(session.username, session.password);
         }
 
         function availableGrades() { return [...new Set(students.map(s => s.grade))].sort(); }
