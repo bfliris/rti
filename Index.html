@@ -476,43 +476,43 @@
                 </section>`;
         }
 
+        // Export builds a real .xlsx entirely in the browser from data already loaded,
+        // so it needs no server call, no Google authorization, and no Drive access —
+        // every user can download it with one click. Formatting mirrors the print view.
         function exportCurrentGrade() {
             if (!currentGrade) {
                 alert('Select a grade before exporting.');
                 return;
             }
-            if (!inAppsScript()) {
-                alert('Open this through your Google Apps Script web-app URL to export.');
-                return;
-            }
 
             const btn = document.querySelector('[onclick="exportCurrentGrade()"]');
             if (btn) { btn.disabled = true; btn.classList.add('opacity-60', 'cursor-wait'); }
+            try {
+                const cols = boardColumns();
+                const colColors = columnColors();
+                const gradeStudents = students.filter(s => s.grade === currentGrade);
 
-            // The server builds a formatted spreadsheet and returns it as .xlsx bytes so
-            // cell colors, headers, and the Location/Skill/Curriculum details match the
-            // print view. Delivered as a download — no Google Sheet is left in anyone's Drive.
-            google.script.run
-                .withSuccessHandler((result) => {
-                    if (btn) { btn.disabled = false; btn.classList.remove('opacity-60', 'cursor-wait'); }
-                    if (result && result.bytes) {
-                        downloadBase64(result.bytes, result.filename || 'board.xlsx',
-                            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-                    } else {
-                        alert('Export failed: no spreadsheet was created.');
-                    }
-                })
-                .withFailureHandler((err) => {
-                    if (btn) { btn.disabled = false; btn.classList.remove('opacity-60', 'cursor-wait'); }
-                    alert('Export failed: ' + (err && err.message ? err.message : err));
-                })
-                .exportBoardToXlsx(currentSubject, currentGrade);
+                const columns = cols.map(group => ({
+                    group,
+                    theme: PRINT_THEMES[colColors[group] || 'slate'] || PRINT_THEMES.slate,
+                    meta: columnMetadata(group),
+                    students: gradeStudents
+                        .filter(s => s[currentSubject].group === group)
+                        .sort((a, b) => scaleOf(a) - scaleOf(b))
+                }));
+
+                const bytes = buildBoardXlsx(columns, gradeStudents.length);
+                const filename = `Grade_${currentGrade}_${currentSubject}_Groups.xlsx`;
+                downloadBytes(bytes, filename,
+                    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+            } catch (err) {
+                alert('Export failed: ' + (err && err.message ? err.message : err));
+            } finally {
+                if (btn) { btn.disabled = false; btn.classList.remove('opacity-60', 'cursor-wait'); }
+            }
         }
 
-        function downloadBase64(base64, filename, mimeType) {
-            const binary = atob(base64);
-            const bytes = new Uint8Array(binary.length);
-            for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+        function downloadBytes(bytes, filename, mimeType) {
             const url = URL.createObjectURL(new Blob([bytes], { type: mimeType }));
             const link = document.createElement('a');
             link.href = url;
@@ -521,6 +521,261 @@
             link.click();
             document.body.removeChild(link);
             setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }
+
+        /* ─── Minimal, dependency-free .xlsx writer ─────────────────────────────
+           Produces an OOXML workbook (a ZIP of XML parts) with cell fills, fonts,
+           and borders. Strings are stored inline; the ZIP uses the STORED method
+           (no compression) so no deflate library is needed. */
+
+        function xmlEscape(s) {
+            return String(s == null ? '' : s)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+        }
+
+        function colLetter(n) { // 1 -> A
+            let s = '';
+            while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = (n - m - 1) / 26; }
+            return s;
+        }
+
+        function argb(hex) { return 'FF' + String(hex).replace('#', '').toUpperCase(); }
+
+        function newStyleSheet() {
+            const fonts = ['<font><sz val="11"/><name val="Calibri"/></font>'];
+            const fills = [
+                '<fill><patternFill patternType="none"/></fill>',
+                '<fill><patternFill patternType="gray125"/></fill>'
+            ];
+            const borders = ['<border><left/><right/><top/><bottom/><diagonal/></border>'];
+            const xfs = ['<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'];
+            const cache = {};
+
+            const dedupe = (arr, xml) => {
+                const key = arr === fonts ? 'f' : arr === fills ? 'l' : 'b';
+                const id = key + xml;
+                if (cache[id] === undefined) { cache[id] = arr.length; arr.push(xml); }
+                return cache[id];
+            };
+
+            function font(spec) {
+                spec = spec || {};
+                const xml = '<font>' + (spec.bold ? '<b/>' : '') +
+                    '<sz val="' + (spec.size || 11) + '"/>' +
+                    (spec.color ? '<color rgb="' + argb(spec.color) + '"/>' : '') +
+                    '<name val="Calibri"/></font>';
+                return dedupe(fonts, xml);
+            }
+            function fill(color) {
+                if (!color) return 0;
+                const xml = '<fill><patternFill patternType="solid"><fgColor rgb="' +
+                    argb(color) + '"/><bgColor indexed="64"/></patternFill></fill>';
+                return dedupe(fills, xml);
+            }
+            function border(color) {
+                if (!color) return 0;
+                const c = '<color rgb="' + argb(color) + '"/>';
+                const side = tag => '<' + tag + ' style="thin">' + c + '</' + tag + '>';
+                const xml = '<border>' + side('left') + side('right') + side('top') + side('bottom') +
+                    '<diagonal/></border>';
+                return dedupe(borders, xml);
+            }
+            function style(spec) {
+                spec = spec || {};
+                const fontId = font(spec.font);
+                const fillId = fill(spec.fill);
+                const borderId = border(spec.border);
+                const align = spec.align
+                    ? '<alignment horizontal="' + spec.align + '"' + (spec.wrap ? ' wrapText="1"' : '') + '/>'
+                    : (spec.wrap ? '<alignment wrapText="1"/>' : '');
+                const xf = '<xf numFmtId="0" fontId="' + fontId + '" fillId="' + fillId +
+                    '" borderId="' + borderId + '" xfId="0" applyFont="1" applyFill="1" applyBorder="1"' +
+                    (align ? ' applyAlignment="1">' + align + '</xf>' : '/>');
+                xfs.push(xf);
+                return xfs.length - 1;
+            }
+            function toXml() {
+                return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+                    '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+                    '<fonts count="' + fonts.length + '">' + fonts.join('') + '</fonts>' +
+                    '<fills count="' + fills.length + '">' + fills.join('') + '</fills>' +
+                    '<borders count="' + borders.length + '">' + borders.join('') + '</borders>' +
+                    '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
+                    '<cellXfs count="' + xfs.length + '">' + xfs.join('') + '</cellXfs>' +
+                    '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>' +
+                    '</styleSheet>';
+            }
+            return { style, toXml };
+        }
+
+        function buildBoardXlsx(columns, studentTotal) {
+            const styles = newStyleSheet();
+            const colCount = Math.max(columns.length, 1);
+
+            const titleStyle = styles.style({ font: { bold: true, size: 16 } });
+            const subtitleStyle = styles.style({ font: { size: 11, color: '#64748b' } });
+
+            // Per-column styles keyed to each column's theme.
+            const colStyles = columns.map(c => ({
+                header: styles.style({ font: { bold: true, color: c.theme.text }, fill: c.theme.header, border: c.theme.border, align: 'center' }),
+                detail: styles.style({ font: { bold: true, size: 9, color: c.theme.text }, fill: c.theme.bg, border: c.theme.border }),
+                body: styles.style({ font: { color: '#1e293b' }, fill: c.theme.bg, border: c.theme.border })
+            }));
+
+            const rows = [];
+            const cell = (col, row, style, value, isNumber) => {
+                const ref = colLetter(col) + row;
+                if (value === undefined || value === null || value === '') {
+                    return '<c r="' + ref + '" s="' + style + '"/>';
+                }
+                if (isNumber) return '<c r="' + ref + '" s="' + style + '"><v>' + value + '</v></c>';
+                return '<c r="' + ref + '" s="' + style + '" t="inlineStr"><is><t xml:space="preserve">' +
+                    xmlEscape(value) + '</t></is></c>';
+            };
+
+            let r = 1;
+            // Title + subtitle rows (value in first cell; merged across the board).
+            let cells = [cell(1, r, titleStyle, 'Grade ' + currentGrade + ' - ' + currentSubject + ' Groups')];
+            for (let i = 2; i <= colCount; i++) cells.push(cell(i, r, titleStyle, ''));
+            rows.push('<row r="' + r + '">' + cells.join('') + '</row>'); r++;
+
+            cells = [cell(1, r, subtitleStyle, studentTotal + ' students across ' + columns.length + ' columns')];
+            for (let i = 2; i <= colCount; i++) cells.push(cell(i, r, subtitleStyle, ''));
+            rows.push('<row r="' + r + '">' + cells.join('') + '</row>'); r++;
+
+            if (columns.length === 0) {
+                rows.push('<row r="' + r + '"><c r="A' + r + '" t="inlineStr"><is><t>No columns available for this grade.</t></is></c></row>');
+            } else {
+                const maxStudents = columns.reduce((m, c) => Math.max(m, c.students.length), 0);
+
+                // Header row.
+                cells = columns.map((c, i) => cell(i + 1, r, colStyles[i].header, c.group + ' (' + c.students.length + ')'));
+                rows.push('<row r="' + r + '">' + cells.join('') + '</row>'); r++;
+
+                // Detail rows: Location / Skill / Curriculum.
+                [['Location', 'location'], ['Skill', 'skill'], ['Curriculum', 'curriculum']].forEach(([label, key]) => {
+                    cells = columns.map((c, i) => cell(i + 1, r, colStyles[i].detail, label + ': ' + (c.meta[key] ? c.meta[key] : '—')));
+                    rows.push('<row r="' + r + '">' + cells.join('') + '</row>'); r++;
+                });
+
+                // Student rows.
+                for (let s = 0; s < maxStudents; s++) {
+                    cells = columns.map((c, i) => {
+                        const student = c.students[s];
+                        const name = student ? student.name + (student.team ? ' (' + student.team + ')' : '') : '';
+                        return cell(i + 1, r, colStyles[i].body, name);
+                    });
+                    rows.push('<row r="' + r + '">' + cells.join('') + '</row>'); r++;
+                }
+            }
+
+            const colsXml = '<cols>' + Array.from({ length: colCount }, (_, i) =>
+                '<col min="' + (i + 1) + '" max="' + (i + 1) + '" width="24" customWidth="1"/>').join('') + '</cols>';
+            const merges = colCount > 1
+                ? '<mergeCells count="2"><mergeCell ref="A1:' + colLetter(colCount) + '1"/>' +
+                  '<mergeCell ref="A2:' + colLetter(colCount) + '2"/></mergeCells>'
+                : '';
+
+            const sheetXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+                '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+                colsXml + '<sheetData>' + rows.join('') + '</sheetData>' + merges + '</worksheet>';
+
+            const sheetName = ('Grade ' + currentGrade + ' ' + currentSubject).slice(0, 31);
+            const parts = {
+                '[Content_Types].xml': '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+                    '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+                    '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+                    '<Default Extension="xml" ContentType="application/xml"/>' +
+                    '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>' +
+                    '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>' +
+                    '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>' +
+                    '</Types>',
+                '_rels/.rels': '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+                    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+                    '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>' +
+                    '</Relationships>',
+                'xl/workbook.xml': '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+                    '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
+                    '<sheets><sheet name="' + xmlEscape(sheetName) + '" sheetId="1" r:id="rId1"/></sheets></workbook>',
+                'xl/_rels/workbook.xml.rels': '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+                    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+                    '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>' +
+                    '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>' +
+                    '</Relationships>',
+                'xl/worksheets/sheet1.xml': sheetXml,
+                'xl/styles.xml': styles.toXml()
+            };
+
+            return zipStore(parts);
+        }
+
+        // CRC-32 (used by the ZIP container).
+        const CRC32_TABLE = (() => {
+            const t = new Uint32Array(256);
+            for (let n = 0; n < 256; n++) {
+                let c = n;
+                for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+                t[n] = c >>> 0;
+            }
+            return t;
+        })();
+
+        function crc32(bytes) {
+            let c = 0xFFFFFFFF;
+            for (let i = 0; i < bytes.length; i++) c = CRC32_TABLE[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
+            return (c ^ 0xFFFFFFFF) >>> 0;
+        }
+
+        // Build a ZIP archive using the STORED method (no compression).
+        function zipStore(parts) {
+            const enc = new TextEncoder();
+            const files = Object.keys(parts).map(name => {
+                const data = enc.encode(parts[name]);
+                return { nameBytes: enc.encode(name), data, crc: crc32(data) };
+            });
+
+            const chunks = [];
+            const central = [];
+            let offset = 0;
+
+            const u16 = v => [v & 0xFF, (v >>> 8) & 0xFF];
+            const u32 = v => [v & 0xFF, (v >>> 8) & 0xFF, (v >>> 16) & 0xFF, (v >>> 24) & 0xFF];
+
+            files.forEach(f => {
+                const n = f.nameBytes.length;
+                const local = [].concat(
+                    u32(0x04034b50), u16(20), u16(0), u16(0), u16(0), u16(0),
+                    u32(f.crc), u32(f.data.length), u32(f.data.length), u16(n), u16(0)
+                );
+                const localHeader = new Uint8Array(local);
+                chunks.push(localHeader, f.nameBytes, f.data);
+
+                const cd = [].concat(
+                    u32(0x02014b50), u16(20), u16(20), u16(0), u16(0), u16(0), u16(0),
+                    u32(f.crc), u32(f.data.length), u32(f.data.length),
+                    u16(n), u16(0), u16(0), u16(0), u16(0), u32(0), u32(offset)
+                );
+                central.push(new Uint8Array(cd), f.nameBytes);
+
+                offset += localHeader.length + n + f.data.length;
+            });
+
+            const centralStart = offset;
+            let centralSize = 0;
+            central.forEach(c => { chunks.push(c); centralSize += c.length; });
+
+            const end = new Uint8Array([].concat(
+                u32(0x06054b50), u16(0), u16(0), u16(files.length), u16(files.length),
+                u32(centralSize), u32(centralStart), u16(0)
+            ));
+            chunks.push(end);
+
+            const total = chunks.reduce((sum, c) => sum + c.length, 0);
+            const out = new Uint8Array(total);
+            let p = 0;
+            chunks.forEach(c => { out.set(c, p); p += c.length; });
+            return out;
         }
 
         function addGroupPrompt() {
