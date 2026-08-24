@@ -498,17 +498,33 @@
             const value = normalizedLevel(level);
             if (!value) return 'slate';
 
-            if (subject === 'ELA') {
-                if (value.includes('two or more') || value.includes('well below')) return 'red';
-                if (value.includes('one grade') || value === 'below' || value.includes('below grade')) return 'yellow';
-                if (value.includes('on or above') || value === 'at' || value.includes('on grade') || value.includes('above')) return 'green';
-                return 'slate';
-            }
+            // Most-severe deficits, regardless of how the district phrases them
+            // ("two or more grade levels below", "well below", "far below…").
+            if (value.includes('two or more') || value.includes('well below') || value.includes('far below')) return 'red';
 
-            if (value.includes('far below')) return 'red';
-            if (value === 'below' || value.includes('below grade')) return 'yellow';
-            if (value.includes('on grade') || value === 'at') return 'green';
-            if (value.includes('above')) return 'blue';
+            const hasBelow = value.includes('below');
+            const hasAbove = value.includes('above');
+
+            // "On/at grade", "on/at benchmark", "on track" and "on or above" all
+            // read as on-track — matched before the plain below/above keywords so
+            // that "on or above grade level" is not mistaken for an above band.
+            const onTrack = value.includes('on or above') || value.includes('at or above') ||
+                            value.includes('on grade') || value.includes('at grade') ||
+                            value.includes('on benchmark') || value.includes('at benchmark') ||
+                            value.includes('on track') || value === 'on' || value === 'at' ||
+                            value.startsWith('on ') || value.startsWith('at ');
+
+            if (onTrack) return 'green';
+
+            // Any remaining "below" is a moderate deficit.
+            if (hasBelow) return 'yellow';
+
+            // Exceeds grade level: Math has a distinct blue band; ELA tops out at green.
+            if (hasAbove) return subject === 'Math' ? 'blue' : 'green';
+
+            // Bare benchmark labels ("Benchmark") read as on-track.
+            if (value.includes('benchmark')) return 'green';
+
             return 'slate';
         }
 
