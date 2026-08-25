@@ -45,7 +45,7 @@ const STUDENT_HEADERS = [
   COL.id, COL.name, COL.grade, COL.team, COL.sped, COL.el, COL.five04,
   COL.absences, COL.tardies,
   'ELA Group', 'ELA BOY Level', 'Current ELA Level', 'Current ORF',
-  'Math Group', 'MATH BOY Level', 'Current Math Level', 'Math Scale Score', 'Tier 1 Level',
+  'Math Group', 'MATH BOY Level', 'Current Math Level', 'BOY IXL Score', 'Tier 1 Level',
   'Current Need', 'Current %',
   COL.updated
 ];
@@ -471,7 +471,7 @@ function getData(username, password) {
     group: str_(get(row, subject + ' Group')) || 'Unassigned',
     level: str_(get(row, boyLevelColumn_(subject))),
     currentLevel: str_(get(row, 'Current ' + subject + ' Level')),
-    scale: get(row, subject === 'ELA' ? 'Current ORF' : 'Current ' + subject + ' Level')
+    scale: get(row, subject === 'ELA' ? 'Current ORF' : 'BOY IXL Score')
   });
 
   const gradeAllowed = (grade) => auth.isMaster || auth.grades.indexOf(str_(grade) || 'Unassigned') !== -1;

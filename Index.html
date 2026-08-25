@@ -1179,7 +1179,7 @@
                     s.five04 === 'Yes' ? flag('504', '504') : ''
                 ].filter(Boolean).join('');
                 const scale = s[currentSubject].scale;
-                const scaleLabel = currentSubject === 'ELA' ? 'ORF' : 'Current Math Level';
+                const scaleLabel = currentSubject === 'ELA' ? 'ORF' : 'IXL Score';
                 return `
                 <div data-id="${escapeAttr(s.id)}" onclick="openModalFromCard(this)" class="student-card relative bg-white p-4 rounded-xl shadow-sm border border-slate-200 cursor-grab hover:border-blue-400 hover:shadow-md transition-all">
                     <div class="absolute top-3 right-3 flex gap-1 pointer-events-none">
