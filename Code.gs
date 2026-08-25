@@ -471,7 +471,7 @@ function getData(username, password) {
     group: str_(get(row, subject + ' Group')) || 'Unassigned',
     level: str_(get(row, boyLevelColumn_(subject))),
     currentLevel: str_(get(row, 'Current ' + subject + ' Level')),
-    scale: get(row, subject === 'ELA' ? 'Current ORF' : subject + ' Scale Score')
+    scale: get(row, subject === 'ELA' ? 'Current ORF' : 'Current ' + subject + ' Level')
   });
 
   const gradeAllowed = (grade) => auth.isMaster || auth.grades.indexOf(str_(grade) || 'Unassigned') !== -1;
