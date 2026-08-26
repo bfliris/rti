@@ -45,7 +45,7 @@ const STUDENT_HEADERS = [
   COL.id, COL.name, COL.grade, COL.team, COL.sped, COL.el, COL.five04,
   COL.absences, COL.tardies,
   'ELA Group', 'ELA BOY Level', 'Current ELA Level', 'Current ORF',
-  'Math Group', 'MATH BOY Level', 'Current Math Level', 'Math Scale Score', 'Tier 1 Level',
+  'Math Group', 'MATH BOY Level', 'Current Math Level', 'BOY IXL Score', 'Tier 1 Level',
   'Current Need', 'Current %',
   COL.updated
 ];
@@ -394,7 +394,13 @@ function usersSheet_(ss) {
  * Returns { isMaster, grades: [gradeLevel, ...] } on success, or null when the
  * credentials don't match any row. A "Master" row grants access to all grades.
  */
+// Temporary switch: when true, login is bypassed and every request is treated
+// as a master (all grades) account. Flip back to false to re-enable logins.
+const LOGIN_DISABLED = true;
+
 function authorizedGrades_(username, password) {
+  if (LOGIN_DISABLED) return { isMaster: true, grades: [] };
+
   const user = str_(username);
   const pass = str_(password);
   if (!user || !pass) return null;
@@ -471,7 +477,7 @@ function getData(username, password) {
     group: str_(get(row, subject + ' Group')) || 'Unassigned',
     level: str_(get(row, boyLevelColumn_(subject))),
     currentLevel: str_(get(row, 'Current ' + subject + ' Level')),
-    scale: get(row, subject === 'ELA' ? 'Current ORF' : subject + ' Scale Score')
+    scale: get(row, subject === 'ELA' ? 'Current ORF' : 'BOY IXL Score')
   });
 
   const gradeAllowed = (grade) => auth.isMaster || auth.grades.indexOf(str_(grade) || 'Unassigned') !== -1;
