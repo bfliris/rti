@@ -135,6 +135,16 @@
                 </div>
             </div>
             <div class="flex items-center space-x-3">
+                <div class="relative" id="search-wrap">
+                    <div class="relative">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M11 19a8 8 0 100-16 8 8 0 000 16z" /></svg>
+                        <input id="student-search" type="text" autocomplete="off"
+                            oninput="onSearchInput()" onfocus="onSearchInput()" onkeydown="onSearchKey(event)"
+                            placeholder="Search students…"
+                            class="w-56 text-sm border border-slate-200 rounded-lg pl-9 pr-3 py-2 bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-400 outline-none transition" />
+                    </div>
+                    <div id="search-results" class="hidden absolute right-0 mt-1 w-72 max-h-80 overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-xl z-50"></div>
+                </div>
                 <button onclick="printCurrentGrade()" class="bg-slate-800 hover:bg-slate-900 text-white px-4 py-2 rounded-lg text-sm font-semibold transition flex items-center shadow-sm" title="Print Current Board">
                     <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" /></svg>
                     Print
@@ -263,7 +273,7 @@
 
         // Temporary switch: when true, the login screen is skipped and the app
         // loads with full (master) access. Set to false to re-enable logins.
-        const LOGIN_DISABLED = true;
+        const LOGIN_DISABLED = false;
 
         function restoreSession() {
             if (LOGIN_DISABLED) {
@@ -1262,6 +1272,69 @@
         function openModalFromCard(card) {
             openModal(card.dataset.id);
         }
+
+        /* ─────────────────────────── Student search ─────────────────────── */
+
+        function searchMatches() {
+            const q = (document.getElementById('student-search').value || '').trim().toLowerCase();
+            if (!q) return [];
+            return students
+                .filter(s => String(s.name).toLowerCase().includes(q) || String(s.id).toLowerCase().includes(q))
+                .sort((a, b) => String(a.name).localeCompare(String(b.name)))
+                .slice(0, 12);
+        }
+
+        function onSearchInput() {
+            const box = document.getElementById('search-results');
+            const matches = searchMatches();
+            if (!matches.length) {
+                const q = (document.getElementById('student-search').value || '').trim();
+                if (!q) { box.classList.add('hidden'); box.innerHTML = ''; return; }
+                box.innerHTML = '<div class="px-3 py-3 text-sm text-slate-400 italic">No students found</div>';
+                box.classList.remove('hidden');
+                return;
+            }
+            box.innerHTML = matches.map(s => {
+                const ela = s.ELA && s.ELA.group ? s.ELA.group : '—';
+                const math = s.Math && s.Math.group ? s.Math.group : '—';
+                return `<button type="button" onclick="selectSearchResult('${escapeAttr(s.id)}')"
+                    class="w-full text-left px-3 py-2 hover:bg-blue-50 border-b border-slate-100 last:border-0 transition">
+                    <div class="flex items-center justify-between">
+                        <span class="text-sm font-semibold text-slate-800">${escapeHtml(s.name)}</span>
+                        <span class="text-[10px] text-slate-400 font-mono">Gr ${escapeHtml(String(s.grade))}</span>
+                    </div>
+                    <div class="text-[11px] text-slate-500 mt-0.5">ELA: <span class="font-medium text-slate-600">${escapeHtml(ela)}</span> · Math: <span class="font-medium text-slate-600">${escapeHtml(math)}</span></div>
+                </button>`;
+            }).join('');
+            box.classList.remove('hidden');
+        }
+
+        function onSearchKey(e) {
+            if (e.key === 'Escape') { closeSearchResults(); e.target.blur(); return; }
+            if (e.key === 'Enter') {
+                const matches = searchMatches();
+                if (matches.length) selectSearchResult(matches[0].id);
+            }
+        }
+
+        function selectSearchResult(id) {
+            closeSearchResults();
+            const input = document.getElementById('student-search');
+            if (input) input.value = '';
+            const s = students.find(x => String(x.id) === String(id));
+            if (s) openModal(s.id);
+        }
+
+        function closeSearchResults() {
+            const box = document.getElementById('search-results');
+            box.classList.add('hidden');
+            box.innerHTML = '';
+        }
+
+        document.addEventListener('click', function (e) {
+            const wrap = document.getElementById('search-wrap');
+            if (wrap && !wrap.contains(e.target)) closeSearchResults();
+        });
 
         function openModal(id) {
             const s = students.find(x => x.id === id);
