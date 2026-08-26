@@ -261,7 +261,17 @@
 
         /* ───────────────────────────── Auth ───────────────────────────── */
 
+        // Temporary switch: when true, the login screen is skipped and the app
+        // loads with full (master) access. Set to false to re-enable logins.
+        const LOGIN_DISABLED = true;
+
         function restoreSession() {
+            if (LOGIN_DISABLED) {
+                session = { username: '', password: '', isMaster: true, grades: [] };
+                showLogin(false);
+                refreshData();
+                return;
+            }
             let saved = null;
             try { saved = JSON.parse(sessionStorage.getItem('rtiSession') || 'null'); } catch (e) { saved = null; }
             if (saved && saved.username && saved.password) {

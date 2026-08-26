@@ -394,7 +394,13 @@ function usersSheet_(ss) {
  * Returns { isMaster, grades: [gradeLevel, ...] } on success, or null when the
  * credentials don't match any row. A "Master" row grants access to all grades.
  */
+// Temporary switch: when true, login is bypassed and every request is treated
+// as a master (all grades) account. Flip back to false to re-enable logins.
+const LOGIN_DISABLED = true;
+
 function authorizedGrades_(username, password) {
+  if (LOGIN_DISABLED) return { isMaster: true, grades: [] };
+
   const user = str_(username);
   const pass = str_(password);
   if (!user || !pass) return null;
