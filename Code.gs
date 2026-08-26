@@ -396,7 +396,7 @@ function usersSheet_(ss) {
  */
 // Temporary switch: when true, login is bypassed and every request is treated
 // as a master (all grades) account. Flip back to false to re-enable logins.
-const LOGIN_DISABLED = true;
+const LOGIN_DISABLED = false;
 
 function authorizedGrades_(username, password) {
   if (LOGIN_DISABLED) return { isMaster: true, grades: [] };
