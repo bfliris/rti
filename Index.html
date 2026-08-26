@@ -133,6 +133,11 @@
                     <button data-subject="ELA"  onclick="setSubject('ELA')"  class="px-3 py-1.5 rounded-md text-sm font-semibold transition">ELA</button>
                     <button data-subject="Math" onclick="setSubject('Math')" class="px-3 py-1.5 rounded-md text-sm font-semibold transition">Math</button>
                 </div>
+                <div id="zoom-toggle" class="hidden sm:flex items-center bg-slate-100 rounded-lg p-1 ml-2" title="Zoom board to fit more or fewer columns">
+                    <button onclick="zoomBoard(-1)" class="w-7 h-7 flex items-center justify-center rounded-md text-slate-600 hover:bg-white hover:shadow-sm font-bold text-lg leading-none transition" title="Zoom out (more columns)">−</button>
+                    <button onclick="zoomBoard(0)" id="zoom-level" class="px-2 min-w-[3rem] text-center text-xs font-semibold text-slate-600 hover:text-slate-900 transition" title="Reset zoom">100%</button>
+                    <button onclick="zoomBoard(1)" class="w-7 h-7 flex items-center justify-center rounded-md text-slate-600 hover:bg-white hover:shadow-sm font-bold text-lg leading-none transition" title="Zoom in (fewer columns)">+</button>
+                </div>
             </div>
             <div class="flex items-center space-x-3">
                 <div class="relative" id="search-wrap">
@@ -235,6 +240,8 @@
         let columnMeta = {};
         let currentGrade = localStorage.getItem('rtiGrade') || null;
         let currentSubject = localStorage.getItem('rtiSubject') || 'ELA';
+        const ZOOM_MIN = 0.5, ZOOM_MAX = 1.4, ZOOM_STEP = 0.1;
+        let boardZoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, parseFloat(localStorage.getItem('rtiZoom')) || 1));
         let activeStudentId = null;
         let columnSortable = null;
         let cardSortables = [];
@@ -448,6 +455,9 @@
         function renderSubjectToggle() {
             const wrap = document.getElementById('subject-toggle');
             wrap.classList.remove('hidden');
+            const zoomWrap = document.getElementById('zoom-toggle');
+            if (zoomWrap) zoomWrap.classList.remove('hidden');
+            applyBoardZoom();
             wrap.querySelectorAll('button').forEach(btn => {
                 const active = btn.dataset.subject === currentSubject;
                 btn.className = 'px-3 py-1.5 rounded-md text-sm font-semibold transition ' +
@@ -1084,8 +1094,27 @@
             localStorage.setItem(boardBarKey(), document.getElementById('board-bar').value);
         }
 
+        function applyBoardZoom() {
+            const board = document.getElementById('board');
+            if (board) board.style.zoom = boardZoom;
+            const label = document.getElementById('zoom-level');
+            if (label) label.innerText = Math.round(boardZoom * 100) + '%';
+        }
+
+        function zoomBoard(dir) {
+            if (dir === 0) {
+                boardZoom = 1;
+            } else {
+                boardZoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN,
+                    Math.round((boardZoom + dir * ZOOM_STEP) * 100) / 100));
+            }
+            localStorage.setItem('rtiZoom', boardZoom);
+            applyBoardZoom();
+        }
+
         function renderBoard() {
             const board = document.getElementById('board');
+            applyBoardZoom();
             resetSortables();
             board.innerHTML = '';
             if (!currentGrade) return;
