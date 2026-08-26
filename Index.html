@@ -259,6 +259,7 @@
         const FLAG_STYLES = { SPED: 'bg-red-100 text-red-700', EL: 'bg-amber-100 text-amber-700', '504': 'bg-purple-100 text-purple-700' };
         const COLOR_KEYS = ['slate', 'red', 'yellow', 'green', 'blue'];
         const SWATCH = { slate: 'bg-slate-300 border-slate-400', red: 'bg-red-400 border-red-500', yellow: 'bg-yellow-400 border-yellow-500', green: 'bg-green-400 border-green-500', blue: 'bg-blue-400 border-blue-500' };
+        const TAG_STYLES = { slate: 'bg-slate-500 text-white', red: 'bg-red-500 text-white', yellow: 'bg-yellow-400 text-yellow-900', green: 'bg-green-500 text-white', blue: 'bg-blue-600 text-white' };
         const PRINT_THEMES = {
             slate:  { bg: '#f8fafc', border: '#cbd5e1', header: '#f1f5f9', text: '#475569' },
             red:    { bg: '#fef2f2', border: '#fecaca', header: '#fee2e2', text: '#b91c1c' },
@@ -1374,26 +1375,33 @@
             document.getElementById('modal-id').innerText = `ID: ${s.id} · Grade ${s.grade}`;
             document.getElementById('modal-reassign-label').innerText = `Reassign ${currentSubject} Group`;
 
+            const groupColorFor = (subject) => {
+                const g = s[subject] && s[subject].group;
+                return (colors[subject] && colors[subject][s.grade] && colors[subject][s.grade][g]) || 'slate';
+            };
+
             const subjCard = (subject) => {
                 const d = s[subject];
-                const active = subject === currentSubject;
                 const scaleLabel = subject === 'ELA' ? 'ORF' : 'Scale';
+                const tagStyle = TAG_STYLES[groupColorFor(subject)] || TAG_STYLES.slate;
                 return `
-                <div class="col-span-2">
-                    <div class="flex items-center justify-between mb-1.5">
-                        <span class="text-[11px] uppercase font-bold tracking-wider ${active ? 'text-blue-700' : 'text-slate-500'}">${subject}</span>
-                        <span class="inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-full shadow-sm ${active ? 'bg-blue-600 text-white' : 'bg-slate-700 text-white'}">
-                            <span class="text-[9px] uppercase tracking-wider opacity-70 font-semibold">Group</span>
-                            ${escapeHtml(d.group || 'Unassigned')}
-                        </span>
+                <div class="flex flex-col">
+                    <div class="mb-1.5 px-2.5 py-1.5 rounded-lg text-center shadow-sm ${tagStyle}">
+                        <div class="text-[9px] uppercase tracking-wider font-semibold opacity-80">${subject} Column</div>
+                        <div class="text-sm font-bold leading-tight truncate">${escapeHtml(d.group || 'Unassigned')}</div>
                     </div>
-                    <div class="p-3 rounded-lg border ${active ? 'bg-blue-50 border-blue-200' : 'bg-slate-50 border-slate-100'}">
+                    <div class="p-3 rounded-lg border bg-slate-50 border-slate-100 flex-grow space-y-1">
                         <div class="flex items-center justify-between text-xs text-slate-500">
-                            <span>BOY Level: <span class="font-semibold text-slate-700">${d.level || 'N/A'}</span></span>
-                            <span>Current Level: <span class="font-semibold text-slate-700">${d.currentLevel || 'N/A'}</span></span>
+                            <span>BOY Level</span>
+                            <span class="font-semibold text-slate-700">${d.level || 'N/A'}</span>
                         </div>
-                        <div class="flex items-center justify-between text-xs text-slate-500 mt-1">
-                            <span>${scaleLabel}: <span class="font-semibold text-blue-600">${d.scale || 'N/A'}</span></span>
+                        <div class="flex items-center justify-between text-xs text-slate-500">
+                            <span>Current Level</span>
+                            <span class="font-semibold text-slate-700">${d.currentLevel || 'N/A'}</span>
+                        </div>
+                        <div class="flex items-center justify-between text-xs text-slate-500">
+                            <span>${scaleLabel}</span>
+                            <span class="font-semibold text-blue-600">${d.scale || 'N/A'}</span>
                         </div>
                     </div>
                 </div>`;
