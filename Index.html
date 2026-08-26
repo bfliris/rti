@@ -1379,17 +1379,22 @@
                 const active = subject === currentSubject;
                 const scaleLabel = subject === 'ELA' ? 'ORF' : 'Scale';
                 return `
-                <div class="p-3 rounded-lg border col-span-2 ${active ? 'bg-blue-50 border-blue-200' : 'bg-slate-50 border-slate-100'}">
-                    <div class="flex items-center justify-between mb-1">
-                        <span class="text-[10px] uppercase font-bold tracking-wider ${active ? 'text-blue-700' : 'text-slate-400'}">${subject}</span>
-                        <span class="text-sm font-semibold text-slate-800">${d.group}</span>
+                <div class="col-span-2">
+                    <div class="flex items-center justify-between mb-1.5">
+                        <span class="text-[11px] uppercase font-bold tracking-wider ${active ? 'text-blue-700' : 'text-slate-500'}">${subject}</span>
+                        <span class="inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-full shadow-sm ${active ? 'bg-blue-600 text-white' : 'bg-slate-700 text-white'}">
+                            <span class="text-[9px] uppercase tracking-wider opacity-70 font-semibold">Group</span>
+                            ${escapeHtml(d.group || 'Unassigned')}
+                        </span>
                     </div>
-                    <div class="flex items-center justify-between text-xs text-slate-500">
-                        <span>BOY Level: <span class="font-semibold text-slate-700">${d.level || 'N/A'}</span></span>
-                        <span>Current Level: <span class="font-semibold text-slate-700">${d.currentLevel || 'N/A'}</span></span>
-                    </div>
-                    <div class="flex items-center justify-between text-xs text-slate-500 mt-1">
-                        <span>${scaleLabel}: <span class="font-semibold text-blue-600">${d.scale || 'N/A'}</span></span>
+                    <div class="p-3 rounded-lg border ${active ? 'bg-blue-50 border-blue-200' : 'bg-slate-50 border-slate-100'}">
+                        <div class="flex items-center justify-between text-xs text-slate-500">
+                            <span>BOY Level: <span class="font-semibold text-slate-700">${d.level || 'N/A'}</span></span>
+                            <span>Current Level: <span class="font-semibold text-slate-700">${d.currentLevel || 'N/A'}</span></span>
+                        </div>
+                        <div class="flex items-center justify-between text-xs text-slate-500 mt-1">
+                            <span>${scaleLabel}: <span class="font-semibold text-blue-600">${d.scale || 'N/A'}</span></span>
+                        </div>
                     </div>
                 </div>`;
             };
