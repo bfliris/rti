@@ -438,8 +438,21 @@ function authenticate(username, password) {
   if (!str_(username) || !str_(password)) {
     return { success: false, error: 'Enter a username and password.' };
   }
-  const auth = authorizedGrades_(username, password);
-  if (!auth) return { success: false, error: 'Incorrect username or password.' };
+  let auth;
+  try {
+    auth = authorizedGrades_(username, password);
+  } catch (e) {
+    return { success: false, error: 'Could not read the Users tab: ' + e.message };
+  }
+  if (!auth) {
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const sheet = ss.getSheetByName(USERS_SHEET);
+    if (!sheet) return { success: false, error: 'No tab named "' + USERS_SHEET + '" found in the spreadsheet.' };
+    const header = headerMap_(sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0]);
+    const missing = USERS_HEADERS.filter(h => header[h] === undefined);
+    if (missing.length) return { success: false, error: 'Users tab is missing header(s): ' + missing.join(', ') };
+    return { success: false, error: 'Incorrect username or password.' };
+  }
   if (!auth.isMaster && auth.grades.length === 0) {
     return { success: false, error: 'This account has no grade levels assigned.' };
   }
